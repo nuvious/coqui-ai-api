@@ -4,3 +4,4 @@ models/
 workspace/*
 !workspace/.gitkeep
 config.yaml
+__pycache__

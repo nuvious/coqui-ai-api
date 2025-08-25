@@ -13,8 +13,5 @@ COPY templates templates
 # Agree to non-commercial license
 ENV COQUI_TOS_AGREED="1"
 
-# ENTRYPOINT [ "gunicorn" ]
-# CMD ["--bind", "0.0.0.0:5000", "app:app"]
-
-ENTRYPOINT [ "python3" ]
-CMD ["app.py"]
+ENTRYPOINT [ "gunicorn" ]
+CMD ["--bind", "0.0.0.0:5000", "app:app"]
