@@ -1,6 +1,6 @@
-# Open Voice API Docker
+# Coqui-AI Docker
 
-A quick containerization of [Open Voice](https://github.com/myshell-ai/OpenVoice/blob/main/setup.py)
+A quick containerization of [Coqui-AI TTS](https://github.com/coqui-ai/TTS)
 with an API for integration with other tools and services.
 
 ## Demo
