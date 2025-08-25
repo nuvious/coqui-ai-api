@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Coqui-AI Text to Speech</title>
+  <!-- Some css to make the UI adaptive to desktop/mobile -->
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #121212;
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 5vh 5vw;
+    }
+
+    h1 {
+      font-size: clamp(1.8rem, 5vw, 3rem);
+      margin-bottom: 5vh;
+      text-align: center;
+    }
+
+    form {
+      width: 100%;
+      max-width: 800px;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 60px;
+      resize: none;
+      font-size: clamp(1rem, 4vw, 1.25rem);
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #444;
+      background-color: #1e1e1e;
+      color: #fff;
+      overflow: hidden;
+    }
+
+    button {
+      width: 100%;
+      margin-top: 20px;
+      padding: 14px;
+      font-size: clamp(1rem, 4vw, 1.25rem);
+      background-color: #2e8b57;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+
+    button:hover {
+      background-color: #276f47;
+    }
+
+    #status {
+      margin-top: 20px;
+      font-size: 1.1rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <h1>Coqui-AI Text to Speech</h1>
+  <form id="generateForm">
+    <textarea id="textInput" rows="3" placeholder="Type your question here..."></textarea>
+    <button type="submit">Generate</button>
+  </form>
+
+  <div id="status"></div>
+
+  <script>
+    // Get the text input
+    const textarea = document.getElementById('textInput');
+    const statusDiv = document.getElementById('status');
+
+    // Adjust text size to text inputed
+    textarea.addEventListener('input', () => {
+      textarea.style.height = 'auto';
+      textarea.style.height = textarea.scrollHeight + 'px';
+    });
+
+    // On generate button clicked
+    document.getElementById('generateForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      //Get the text
+      const text = textarea.value.trim();
+      if (!text) return;
+
+      // Update the status
+      statusDiv.textContent = 'Generating...';
+      textarea.disabled = true;
+
+      try {
+        // Make the call to create the generation job
+        const response = await fetch('/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        });
+
+        if (!response.ok) throw new Error('Failed to start generation.');
+
+        // Get the id from the response
+        const response_body = await response.json();
+        const job_id = response_body.job_id;
+
+        // Setup polling interval
+        const pollInterval = 2000;
+        let attempts = 0;
+        const maxAttempts = 30;
+
+        // Poll for the file using the /job endpoint
+        const pollForFile = async () => {
+          attempts++;
+          try {
+            const downloadResponse = await fetch(`/job/${job_id}`);
+            if (downloadResponse.status === 200) {
+              // Download it once it's ready
+              const blob = await downloadResponse.blob();
+
+              // Hack to get the file to download
+              const fileName = `${job_id}.wav`;
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = fileName;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+
+              // Play the audio
+              const audio = new Audio(url);
+              audio.play();
+              statusDiv.textContent = `Playing: ${fileName}`;
+
+              // Wait for the audio to finish
+              audio.addEventListener('ended', async () => {
+                statusDiv.textContent = 'Cleaning up...';
+                try {
+                  // Delete the file to keep the server storage tidy
+                  const deleteResponse = await fetch(`/job/${job_id}`, {
+                    method: 'DELETE'
+                  });
+                  if (deleteResponse.ok) {
+                    statusDiv.textContent = 'Done.';
+                  } else {
+                    statusDiv.textContent = 'Failed to delete file.';
+                  }
+                } catch (err) {
+                  console.error(err);
+                  statusDiv.textContent = 'Error during cleanup.';
+                }
+
+                URL.revokeObjectURL(url); // free memory
+              });
+
+              return;
+            } else if (downloadResponse.status === 404) {
+              // Assume on 404 the file is still generating
+              if (attempts < maxAttempts) {
+                statusDiv.textContent = `Still working... (${attempts})`;
+                setTimeout(pollForFile, pollInterval);
+              } else {
+                // If it fails after 1 minute, give up
+                statusDiv.textContent = 'Generation timed out. Please try again.';
+              }
+            } else {
+              throw new Error('Unexpected response while polling.');
+            }
+          } catch (err) {
+            console.error(err);
+            statusDiv.textContent = 'An error occurred while downloading the file.';
+          }
+        };
+
+        // Now actually poll for the file by calling the polling function
+        pollForFile();
+      } catch (error) {
+        console.error(error);
+        statusDiv.textContent = 'An error occurred during generation.';
+      } finally {
+        textarea.value = '';
+        textarea.style.height = 'auto';
+        textarea.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

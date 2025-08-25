@@ -1,0 +1,6 @@
+models/
+!models/.gitkeep
+*.wav
+workspace/*
+!workspace/.gitkeep
+config.yaml
