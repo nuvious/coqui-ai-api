@@ -9,6 +9,11 @@ Here's a quick demo of the api as demonstrated in a frontend demo implementation
 
 [![coqui-ai api demo](https://img.youtube.com/vi/WtppzfYtkwQ/0.jpg)](https://www.youtube.com/watch?v=WtppzfYtkwQ)
 
+## Requirements
+
+- Docker
+- [Nvidia Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+
 ## Quickstart
 
 First create a configuration file in a directory called `workspace`:
@@ -61,6 +66,12 @@ docker run --rm -it --runtime=nvidia \
   ai-tts
 ```
 
+### User Interface
+
+A simple user interface is provided as well at the root endpoint;
+
+[http://localhost:5000/](http://localhost:5000/)
+
 ### API Usage
 
 #### OpenAPI
@@ -97,54 +108,4 @@ using the delete endpoint:
 
 ```bash
 curl -X DELETE http://localhost:5000/delete/70341b89-e5e5-4b38-bb6b-7f242498ed83
-```
-
-### User Interface
-
-A simple user interface is provided as well at the root endpoint;
-
-[http://localhost:5000/](http://localhost:5000/)
-
-## Requirements
-
-- Docker
-- [Nvidia Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
-
-### Pull Containers
-
-```bash
-docker pull ghcr.io/coqui-ai/tts
-docker pull ghcr.io/coqui-ai/tts-cpu
-```
-
-Optionally, push to local registry:
-
-```bash
-docker tag ghcr.io/coqui-ai/tts registry.bearden.local/coqui-ai-tts:latest
-docker push registry.bearden.local/coqui-ai-tts:latest
-docker tag ghcr.io/coqui-ai/tts-cpu registry.bearden.local/coqui-ai-tts-cpu:latest
-docker push registry.bearden.local/coqui-ai-tts-cpu:latest
-```
-
-## Run TTS Directly in the Container
-
-You can use the container to generate audio with tts directly using the tts command. Just launch the
-container with an interactive terminal:
-
-```bash
-docker run --rm -it \
-    -v $PWD/models:/root/.local/share/tts \
-    -v $PWD/workspace:/workspace \
-    -p 5002:5002 \
-    --gpus all --entrypoint /bin/bash \
-    ghcr.io/coqui-ai/tts
-```
-
-```bash
-tts --model_name tts_models/multilingual/multi-dataset/xtts_v2 \
-    --text "This is a test." \
-    --speaker_wav /workspace/speaker.wav \
-    --out_path /workspace/gen.wav \
-    --language_idx en \
-    --use_cuda true
 ```
