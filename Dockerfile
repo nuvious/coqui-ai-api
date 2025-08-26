@@ -15,3 +15,7 @@ ENV COQUI_TOS_AGREED="1"
 
 ENTRYPOINT [ "gunicorn" ]
 CMD ["--bind", "0.0.0.0:5000", "app:app"]
+
+# For local debugging uncomment the below.
+# ENTRYPOINT [ "python3" ]
+# CMD [ "app.py" ]

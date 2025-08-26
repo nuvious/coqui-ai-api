@@ -57,7 +57,7 @@ docker run --rm -it --runtime=nvidia \
 ### Build Container from Source
 
 ```bash
-docker build -t ai-tts .
+docker build -t ai-tts . && \
 docker run --rm -it --runtime=nvidia \
   -v "${PWD}:/app" \
   -v "${PWD}/workspace:/workspace" \
