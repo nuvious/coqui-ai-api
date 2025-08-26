@@ -23,13 +23,17 @@ app = OpenAPI(__name__, info=info)
 CORS(app, **CONFIG.get("cors", {}))
 
 
-class GenerateJob(BaseModel):
+JOB_GENERATION_TAG = Tag(name='Generation', description='Endpoints that create audio generation jobs.')
+JOB_FILE_OPERATIONS_TAG = Tag(name='Job File Ops', description='Job file operations.')
+
+class JobGenerationModel(BaseModel):
     text: str
 
-
-class Job(BaseModel):
+class JobModel(BaseModel):
     job_id: str
 
+class ErrorResponseModel(BaseModel):
+    message: str
 
 # Flask logging config
 dictConfig(
@@ -103,82 +107,18 @@ worker_thread = threading.Thread(target=tts_worker, daemon=True)
 worker_thread.start()
 
 
-@app.get("/", methods=["GET"])
-def index() -> str:
+@app.post("/generate", summary="Generate audio job creation.", tags=[JOB_GENERATION_TAG], responses={
+    201: JobModel,
+    400: ErrorResponseModel
+})
+def post_generate(body: JobGenerationModel) -> Response:
     """
-    Simple user interface for the api.
-
-    Returns
-    -------
-    str
-        The template
-    """
-    return render_template("index.html")
-
-
-@app.delete("/job/<string:job_id>", summary="Delete job file.")
-def delete_job(path: Job) -> Response:
-    """
-    Deletes a generated audio file
-
-    Parameters
-    ----------
-    job_id : str
-        The job ID
-
-    Returns
-    -------
-    Response
-        Either 404 if the file doesn't exist or a 204 if it was deleted.
-    """
-    wav_file = _get_filename(path.job_id)
-    try:
-        os.remove(wav_file)
-    except Exception as e:
-        app.logger.error(f"Failed to delete {wav_file}: {e}")
-        return jsonify({"error": "File not found."}), 404
-    return jsonify({"error": "Deleted."}), 204
-
-
-@app.get("/job/<string:job_id>", summary="Get generated wav file.")
-def get_job(path: Job) -> Response:
-    """
-    Gets a generated audio file
-
-    Parameters
-    ----------
-    job_id : str
-        The job ID
-
-    Returns
-    -------
-    Response
-        Either 200 with a wav file or 404 if the job is still processing.
-    """
-    wav_file = _get_filename(path.job_id)
-
-    if not os.path.isfile(wav_file):
-        return jsonify({"error": "File still processing or does not exist."}), 404
-
-    return send_file(wav_file, as_attachment=True)
-
-
-@app.post("/generate", summary="Generate audio job creation.")
-def post_generate(body: GenerateJob) -> Response:
-    """
-    Generates an audio file from text given a body in the format:
-
-    {"text": "text to turn into audio"}
-
-    Returns
-    -------
-    Response
-        400 for bad requests, or a 201 if the job was created.
+    Generates an audio file from provided text.
     """
     app.logger.info(f"Text: {body.text}")
 
     if not body.text:
-        return jsonify({"error": "Missing or empty text."}), 400
+        return jsonify({"message": "Missing or empty text."}), 400
 
     # Generate a job id and output path
     job_id = str(uuid.uuid4())
@@ -192,6 +132,48 @@ def post_generate(body: GenerateJob) -> Response:
     # Return 201
     return jsonify({"job_id": str(job_id)}), 201
 
+
+@app.get("/job/<string:job_id>", summary="Get generated wav file.", tags=[JOB_FILE_OPERATIONS_TAG], responses={
+    200: {"content": {"audio/wav": {}}},
+    404: ErrorResponseModel
+})
+def get_job(path: JobModel) -> Response:
+    """
+    Gets a generated audio file given a job id.
+    """
+    wav_file = _get_filename(path.job_id)
+
+    if not os.path.isfile(wav_file):
+        return jsonify({"error": "File still processing or does not exist."}), 404
+
+    return send_file(wav_file, as_attachment=True)
+
+
+
+@app.delete("/job/<string:job_id>", summary="Delete job file.", tags=[JOB_FILE_OPERATIONS_TAG],
+            responses={
+                204: None,
+                404: ErrorResponseModel
+            })
+def delete_job(path: JobModel) -> Response:
+    """
+    Deletes a generated audio file given a job id.
+    """
+    wav_file = _get_filename(path.job_id)
+    try:
+        os.remove(wav_file)
+    except Exception as e:
+        app.logger.error(f"Failed to delete {wav_file}: {e}")
+        return jsonify({"message": "File not found."}), 404
+    return Response(None, 204)
+
+
+@app.get("/", methods=["GET"])
+def index() -> str:
+    """
+    Simple user interface for the api.
+    """
+    return render_template("index.html")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
