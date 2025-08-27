@@ -3,37 +3,12 @@
 A quick containerization of [Coqui-AI TTS](https://github.com/coqui-ai/TTS)
 with an API for integration with other tools and services.
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Warning Banner</title>
-  <style>
-    .warning-banner {
-      background-color: rgba(255, 0, 0, 0.2); /* Transparent red */
-      color: rgba(255, 255, 255, 1); /* Dark red text */
-      padding: 10px 20px;
-      font-family: Arial, sans-serif;
-      border: 1px solid rgba(255, 0, 0, 0.5);
-      margin: 20px;
-      border-radius: 5px;
-    }
-    .warning-banner .label {
-      font-weight: bold;
-      margin-right: 5px;
-    }
-  </style>
-</head>
-<body>
 
-  <div class="warning-banner">
-    <span class="label">WARNING:</span> 
-    This containerization automatically agrees to the license requirements of the coqui-ai project for the purposes of functionality. If using this for a commercial use, <a href="https://docs.coqui.ai/en/latest/models/xtts.html#contact">contact the coqui-ai project on how to obtain a commercial license</a>.
-  </div>
-
-</body>
-</html>
-
+> ⚠️ <strong style="color:red">WARNING:</strong> This 
+> containerization automatically agrees to the license 
+> requirements of the coqui-ai project for the purposes of 
+> functionality. If using this for a commercial use, 
+> [contact the coqui-ai project on how to obtain a commercial license](https://docs.coqui.ai/en/latest/models/xtts.html#contact).
 
 ## Demo
 
