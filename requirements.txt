@@ -4,3 +4,6 @@ TTS==0.22.0
 pyyaml==6.0.2
 gunicorn==23.0.0
 flask-openapi3[swagger,redoc,rapidoc,rapipdf,scalar,elements]==4.2.1
+Flask-Login==0.6.3
+passlib==1.7.4
+sqlalchemy==2.0.43

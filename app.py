@@ -12,6 +12,11 @@ from flask_openapi3 import Info, OpenAPI, Tag
 from pydantic import BaseModel
 from TTS.api import TTS
 
+# https://blog.miguelgrinberg.com/post/restful-authentication-with-flask
+from sqlalchemy import create_engine, Column, Index, Integer, String
+from sqlalchemy.orm import sessionmaker, declarative_base
+from passlib.apps import custom_app_context as pwd_context
+
 # Environment variable overrides
 SPEAKER_WAV = os.getenv("SPEAKER_WAV", "/workspace/speaker.wav")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/workspace")
@@ -34,6 +39,20 @@ class JobModel(BaseModel):
 
 class ErrorResponseModel(BaseModel):
     message: str
+
+Base = declarative_base()
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key = True)
+    username = Column(String(32), index = True)
+    password_hash = Column(String(128))
+
+    def hash_password(self, password):
+        self.password_hash = pwd_context.encrypt(password)
+
+    def verify_password(self, password):
+        return pwd_context.verify(password, self.password_hash)
 
 # Flask logging config
 dictConfig(
