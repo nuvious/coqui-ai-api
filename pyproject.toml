@@ -1,0 +1,23 @@
+[project]
+name = "coqui-ai-api"
+version = "0.1.1"
+description = "A REST API wrapper for the Coqui-AI TTS engine with voice cloning support."
+authors = [
+    { name = "David Cheeseman", email = "5287736+nuvious@users.noreply.github.com" }
+]
+requires-python = ">=3.9,<3.12"
+dependencies = [
+    "flask==3.1.2",
+    "flask-cors==6.0.1",
+    "flask-openapi3[elements,rapidoc,rapipdf,redoc,scalar,swagger]==4.2.1",
+    "gunicorn==23.0.0",
+    "pyyaml==6.0.2",
+    "tts==0.22.0",
+]
+
+[project.scripts]
+coqui-ai-api = "coqui_ai_api.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,18 @@
+services:
+  coqui-ai-api:
+    build:
+      context: .
+      cache_from:
+        - ghcr.io/coqui-ai/tts:v0.22.0
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./workspace:/workspace
+      - ./models:/root/.local/share/tts
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
