@@ -2,20 +2,19 @@ FROM ghcr.io/coqui-ai/tts:v0.22.0
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY pyproject.toml .
+COPY src/ src/
 
-RUN pip3 install -r requirements.txt && \
+RUN pip3 install uv && \
+    pip3 install . && \
     mkdir /workspace
-
-COPY app.py .
-COPY templates templates
 
 # Agree to non-commercial license
 ENV COQUI_TOS_AGREED="1"
 
-ENTRYPOINT [ "gunicorn" ]
-CMD ["--bind", "0.0.0.0:5000", "app:app"]
+ENTRYPOINT ["gunicorn"]
+CMD ["--bind", "0.0.0.0:5000", "coqui_ai_api.app:app"]
 
 # For local debugging uncomment the below.
-# ENTRYPOINT [ "python3" ]
-# CMD [ "app.py" ]
+# ENTRYPOINT ["coqui-ai-api"]
+# CMD []
