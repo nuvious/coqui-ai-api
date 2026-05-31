@@ -1,3 +1,4 @@
+import glob
 import os
 import queue
 import threading
@@ -9,13 +10,27 @@ import yaml
 from flask import Response, jsonify, render_template, send_file
 from flask_cors import CORS
 from flask_openapi3 import Info, OpenAPI, Tag
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from TTS.api import TTS
 
 # Environment variable overrides
 SPEAKER_WAV = os.getenv("SPEAKER_WAV", "/workspace/speaker.wav")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "/workspace")
 CONFIG_FILE = os.getenv("CONFIG_FILE", "/workspace/config.yaml")
+
+
+def _list_speaker_wavs() -> list[str]:
+    """Return basenames of wav files in OUTPUT_DIR that are not job outputs."""
+    wavs = []
+    for path in glob.glob(os.path.join(OUTPUT_DIR, "*.wav")):
+        name = os.path.splitext(os.path.basename(path))[0]
+        try:
+            uuid.UUID(name)
+        except ValueError:
+            wavs.append(os.path.basename(path))
+    return sorted(wavs)
+
+
 CONFIG = yaml.load(open(CONFIG_FILE, "r"), Loader=yaml.SafeLoader)
 
 info = Info(title="Coqui-AI API", version="0.1.0")
@@ -28,6 +43,7 @@ JOB_FILE_OPERATIONS_TAG = Tag(name='Job File Ops', description='Job file operati
 
 class JobGenerationModel(BaseModel):
     text: str
+    speaker_wav: str = Field(default="", description="Basename of a speaker wav in the workspace (e.g. 'rick.wav'). Defaults to the server's configured SPEAKER_WAV.")
 
 class JobModel(BaseModel):
     job_id: str
@@ -86,13 +102,14 @@ def tts_worker():
         text = task["text"]
         app.logger.info(f"Generating audio: {text}")
         output_path = task["output_path"]
+        speaker_wav = task.get("speaker_wav") or SPEAKER_WAV
 
         # Generate the audio
         try:
             tts.tts_to_file(
                 text=text,
                 file_path=output_path,
-                speaker_wav=[SPEAKER_WAV],
+                speaker_wav=[speaker_wav],
                 **CONFIG.get("tts_to_file_params", {}),
             )
             app.logger.info(f"Audio file generated: {output_path}")
@@ -124,9 +141,15 @@ def post_generate(body: JobGenerationModel) -> Response:
     job_id = str(uuid.uuid4())
     output_path = os.path.join(OUTPUT_DIR, _get_filename(str(job_id)))
 
+    speaker_wav = None
+    if body.speaker_wav:
+        candidate = os.path.join(OUTPUT_DIR, os.path.basename(body.speaker_wav))
+        if os.path.isfile(candidate):
+            speaker_wav = candidate
+
     # Add a job into the job queue
     text_queue.put(
-        {"text": body.text, "output_path": output_path, "job_id": str(job_id)}
+        {"text": body.text, "output_path": output_path, "job_id": str(job_id), "speaker_wav": speaker_wav}
     )
 
     # Return 201
@@ -165,6 +188,14 @@ def delete_job(path: JobModel) -> Response:
         app.logger.error(f"Failed to delete {wav_file}: {e}")
         return jsonify({"message": "File not found."}), 404
     return Response(None, 204)
+
+
+@app.get("/voices", summary="List available speaker wav files.", tags=[JOB_GENERATION_TAG], responses={200: {}})
+def get_voices() -> Response:
+    """
+    Returns a list of available speaker wav filenames from the workspace.
+    """
+    return jsonify({"voices": _list_speaker_wavs()})
 
 
 @app.get("/", methods=["GET"])

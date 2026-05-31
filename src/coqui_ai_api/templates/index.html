@@ -55,6 +55,19 @@
       overflow: hidden;
     }
 
+    select {
+      width: 100%;
+      margin-top: 16px;
+      padding: 12px;
+      font-size: clamp(1rem, 4vw, 1.25rem);
+      border-radius: 8px;
+      border: 1px solid #444;
+      background-color: #1e1e1e;
+      color: #fff;
+      appearance: none;
+      cursor: pointer;
+    }
+
     button {
       width: 100%;
       margin-top: 20px;
@@ -73,9 +86,25 @@
     }
 
     #status {
+      width: 100%;
+      max-width: 800px;
       margin-top: 20px;
       font-size: 1.1rem;
       text-align: center;
+    }
+
+    #status audio {
+      display: block;
+      width: 100%;
+      margin-top: 12px;
+    }
+
+    #status .dismiss-btn {
+      background-color: #555;
+    }
+
+    #status .dismiss-btn:hover {
+      background-color: #444;
     }
   </style>
 </head>
@@ -83,6 +112,9 @@
   <h1>Coqui-AI Text to Speech</h1>
   <form id="generateForm">
     <textarea id="textInput" rows="3" placeholder="Type your question here..."></textarea>
+    <select id="voiceSelect">
+      <option value="">Loading voices...</option>
+    </select>
     <button type="submit">Generate</button>
   </form>
 
@@ -91,7 +123,29 @@
   <script>
     // Get the text input
     const textarea = document.getElementById('textInput');
+    const voiceSelect = document.getElementById('voiceSelect');
     const statusDiv = document.getElementById('status');
+
+    // Populate voice dropdown
+    (async () => {
+      try {
+        const res = await fetch('/voices');
+        const data = await res.json();
+        voiceSelect.innerHTML = '';
+        if (data.voices.length === 0) {
+          voiceSelect.innerHTML = '<option value="">No voices found</option>';
+        } else {
+          data.voices.forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = v.replace(/\.wav$/i, '');
+            voiceSelect.appendChild(opt);
+          });
+        }
+      } catch (e) {
+        voiceSelect.innerHTML = '<option value="">Failed to load voices</option>';
+      }
+    })();
 
     // Adjust text size to text inputed
     textarea.addEventListener('input', () => {
@@ -111,11 +165,13 @@
       textarea.disabled = true;
 
       try {
+        const speaker_wav = voiceSelect.value;
+
         // Make the call to create the generation job
         const response = await fetch('/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text })
+          body: JSON.stringify({ text, speaker_wav })
         });
 
         if (!response.ok) throw new Error('Failed to start generation.');
@@ -135,44 +191,45 @@
           try {
             const downloadResponse = await fetch(`/job/${job_id}`);
             if (downloadResponse.status === 200) {
-              // Download it once it's ready
               const blob = await downloadResponse.blob();
-
-              // Hack to get the file to download
-              const fileName = `${job_id}.wav`;
               const url = URL.createObjectURL(blob);
+
+              // Trigger browser download
               const a = document.createElement('a');
               a.href = url;
-              a.download = fileName;
+              a.download = `${job_id}.wav`;
               document.body.appendChild(a);
               a.click();
               document.body.removeChild(a);
 
-              // Play the audio
-              const audio = new Audio(url);
-              audio.play();
-              statusDiv.textContent = `Playing: ${fileName}`;
+              // Show audio player for user-controlled playback
+              const audio = document.createElement('audio');
+              audio.controls = true;
+              audio.src = url;
 
-              // Wait for the audio to finish
-              audio.addEventListener('ended', async () => {
+              const dismissBtn = document.createElement('button');
+              dismissBtn.textContent = 'Dismiss';
+              dismissBtn.className = 'dismiss-btn';
+
+              let cleaned = false;
+              const cleanup = async () => {
+                if (cleaned) return;
+                cleaned = true;
+                URL.revokeObjectURL(url);
                 statusDiv.textContent = 'Cleaning up...';
                 try {
-                  // Delete the file to keep the server storage tidy
-                  const deleteResponse = await fetch(`/job/${job_id}`, {
-                    method: 'DELETE'
-                  });
-                  if (deleteResponse.ok) {
-                    statusDiv.textContent = 'Done.';
-                  } else {
-                    statusDiv.textContent = 'Failed to delete file.';
-                  }
+                  await fetch(`/job/${job_id}`, { method: 'DELETE' });
                 } catch (err) {
                   console.error(err);
-                  statusDiv.textContent = 'Error during cleanup.';
                 }
+                statusDiv.textContent = 'Done.';
+              };
 
-                URL.revokeObjectURL(url); // free memory
-              });
+              dismissBtn.addEventListener('click', cleanup);
+
+              statusDiv.textContent = 'Ready:';
+              statusDiv.appendChild(audio);
+              statusDiv.appendChild(dismissBtn);
 
               return;
             } else if (downloadResponse.status === 404) {
