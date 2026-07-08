@@ -8,14 +8,16 @@ import wave
 from logging.config import dictConfig
 from typing import Annotated
 
-import torch
 import yaml
 from flask import Response, jsonify, render_template, send_file
 from werkzeug.datastructures import FileStorage
 from flask_cors import CORS
 from flask_openapi3 import Info, OpenAPI, Tag
 from pydantic import BaseModel, Field, WithJsonSchema
-from TTS.api import TTS
+
+# NOTE: ``torch`` and ``TTS`` are heavyweight (multi-GB) and are only needed by
+# the background worker. They are imported lazily inside ``tts_worker`` so the
+# Flask app (and the test suite) can be imported without them.
 
 # Environment variable overrides
 SPEAKER_WAV = os.getenv("SPEAKER_WAV", "/workspace/speaker.wav")
@@ -146,9 +148,41 @@ def _get_filename(job_id: str):
     return os.path.join(OUTPUT_DIR, f"{job_id}.wav")
 
 
+def _process_task(tts, task: dict):
+    """Synthesise a single queued task with the given TTS model.
+
+    Holds the per-task generation logic (extracted from ``tts_worker`` so it can
+    be unit-tested with a mocked TTS instance). On success/failure of a segment
+    that belongs to a long-form job, notifies the orchestrator.
+    """
+    text = task["text"]
+    app.logger.info(f"Generating audio: {text}")
+    output_path = task["output_path"]
+    speaker_wav = task.get("speaker_wav") or SPEAKER_WAV
+
+    parent_job_id = task.get("parent_job_id")
+    try:
+        tts.tts_to_file(
+            text=text,
+            file_path=output_path,
+            speaker_wav=[speaker_wav],
+            **CONFIG.get("tts_to_file_params", {}),
+        )
+        app.logger.info(f"Audio file generated: {output_path}")
+        if parent_job_id:
+            _handle_segment_complete(parent_job_id, success=True)
+    except Exception as e:
+        app.logger.error(f"TTS generation failed: {e}")
+        if parent_job_id:
+            _handle_segment_complete(parent_job_id, success=False)
+
+
 # Global shared TTS instance (loaded once in the worker)
-def tts_worker():
+def tts_worker():  # pragma: no cover - requires the real model and runs forever
     """A worker thread function to generate audio from a queue to save vram"""
+    import torch
+    from TTS.api import TTS
+
     # Initialize the model
     app.logger.info("Initializing TTS model...")
     tts = TTS(
@@ -166,34 +200,17 @@ def tts_worker():
         task = text_queue.get()
         if task is None:
             break
-        text = task["text"]
-        app.logger.info(f"Generating audio: {text}")
-        output_path = task["output_path"]
-        speaker_wav = task.get("speaker_wav") or SPEAKER_WAV
-
-        # Generate the audio
-        parent_job_id = task.get("parent_job_id")
         try:
-            tts.tts_to_file(
-                text=text,
-                file_path=output_path,
-                speaker_wav=[speaker_wav],
-                **CONFIG.get("tts_to_file_params", {}),
-            )
-            app.logger.info(f"Audio file generated: {output_path}")
-            if parent_job_id:
-                _handle_segment_complete(parent_job_id, success=True)
-        except Exception as e:
-            app.logger.error(f"TTS generation failed: {e}")
-            if parent_job_id:
-                _handle_segment_complete(parent_job_id, success=False)
+            _process_task(tts, task)
         finally:
             text_queue.task_done()
 
 
-# Create a background thread for the worker
-worker_thread = threading.Thread(target=tts_worker, daemon=True)
-worker_thread.start()
+# Create a background thread for the worker. Disabled in tests (which set
+# COQUI_AI_API_START_WORKER=0) to avoid loading the multi-GB model on import.
+if os.getenv("COQUI_AI_API_START_WORKER", "1") != "0":  # pragma: no cover
+    worker_thread = threading.Thread(target=tts_worker, daemon=True)
+    worker_thread.start()
 
 
 @app.post("/generate", summary="Generate audio job creation.", tags=[JOB_GENERATION_TAG], responses={
@@ -211,7 +228,7 @@ def post_generate(body: JobGenerationModel) -> Response:
 
     # Generate a job id and output path
     job_id = str(uuid.uuid4())
-    output_path = os.path.join(OUTPUT_DIR, _get_filename(str(job_id)))
+    output_path = _get_filename(job_id)
 
     speaker_wav = None
     if body.speaker_wav:

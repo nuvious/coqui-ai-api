@@ -1,4 +1,4 @@
-# Guidance for Claude
+# Guidance for AI agents
 
 All contributor, architecture, and testing guidance for this project lives in a
 single source of truth: **[CONTRIBUTING.md](CONTRIBUTING.md)**.
