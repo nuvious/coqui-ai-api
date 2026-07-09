@@ -16,6 +16,7 @@ def _write_wav(path, frames=b"\x01\x00" * 40):
 
 class TestProcessTask:
     def test_calls_tts_with_expected_args(self, app, output_dir):
+        app.register_job("j1", kind="single", word_count=1)
         tts = MagicMock()
         out = str(output_dir / "out.wav")
         task = {"text": "Hi", "output_path": out, "job_id": "j1", "speaker_wav": None}
@@ -30,10 +31,11 @@ class TestProcessTask:
         )
 
     def test_uses_task_speaker_wav_when_given(self, app, output_dir):
+        app.register_job("j1", kind="single", word_count=1)
         tts = MagicMock()
         task = {
             "text": "Hi",
-            "output_path": "x.wav",
+            "output_path": str(output_dir / "x.wav"),
             "job_id": "j1",
             "speaker_wav": "/custom/voice.wav",
         }
@@ -41,19 +43,21 @@ class TestProcessTask:
         _, kwargs = tts.tts_to_file.call_args
         assert kwargs["speaker_wav"] == ["/custom/voice.wav"]
 
-    def test_success_notifies_parent(self, app, monkeypatch):
+    def test_success_notifies_parent(self, app, output_dir, monkeypatch):
+        app.register_job("s1", kind="segment", word_count=1, parent_job_id="p1")
         calls = []
         monkeypatch.setattr(
             app, "_handle_segment_complete",
             lambda pid, success: calls.append((pid, success)),
         )
         tts = MagicMock()
-        task = {"text": "Hi", "output_path": "x.wav", "job_id": "s1", "parent_job_id": "p1"}
+        task = {"text": "Hi", "output_path": str(output_dir / "x.wav"), "job_id": "s1", "parent_job_id": "p1"}
 
         app._process_task(tts, task)
         assert calls == [("p1", True)]
 
-    def test_failure_notifies_parent(self, app, monkeypatch):
+    def test_failure_notifies_parent(self, app, output_dir, monkeypatch):
+        app.register_job("s1", kind="segment", word_count=1, parent_job_id="p1")
         calls = []
         monkeypatch.setattr(
             app, "_handle_segment_complete",
@@ -61,21 +65,56 @@ class TestProcessTask:
         )
         tts = MagicMock()
         tts.tts_to_file.side_effect = RuntimeError("boom")
-        task = {"text": "Hi", "output_path": "x.wav", "job_id": "s1", "parent_job_id": "p1"}
+        task = {"text": "Hi", "output_path": str(output_dir / "x.wav"), "job_id": "s1", "parent_job_id": "p1"}
 
         app._process_task(tts, task)  # must not raise
         assert calls == [("p1", False)]
 
-    def test_no_parent_does_not_notify(self, app, monkeypatch):
+    def test_no_parent_does_not_notify(self, app, output_dir, monkeypatch):
+        app.register_job("s1", kind="single", word_count=1)
         calls = []
         monkeypatch.setattr(
             app, "_handle_segment_complete",
             lambda pid, success: calls.append((pid, success)),
         )
         tts = MagicMock()
-        task = {"text": "Hi", "output_path": "x.wav", "job_id": "s1"}
+        task = {"text": "Hi", "output_path": str(output_dir / "x.wav"), "job_id": "s1"}
         app._process_task(tts, task)
         assert calls == []
+
+    def test_skips_task_for_job_removed_from_registry(self, app, output_dir):
+        """A job deleted (DELETE /job/<id>) before synthesis starts is cancelled."""
+        app.register_job("j1", kind="single", word_count=1)
+        app._expire_job("j1")
+        tts = MagicMock()
+        out = output_dir / "j1.wav"
+        task = {"text": "Hi", "output_path": str(out), "job_id": "j1", "word_count": 1}
+
+        app._process_task(tts, task)
+
+        tts.tts_to_file.assert_not_called()
+        assert not out.exists()
+        assert "j1" not in app.expiration_timers
+
+    def test_discards_output_for_job_deleted_mid_synthesis(self, app, output_dir):
+        """A job deleted while the model is running must not leave a WAV or bookkeeping."""
+        app.register_job("j1", kind="single", word_count=1)
+        out = output_dir / "j1.wav"
+
+        def _write_then_delete(*args, **kwargs):
+            _write_wav(out)
+            app._expire_job("j1")
+
+        tts = MagicMock()
+        tts.tts_to_file.side_effect = _write_then_delete
+        task = {"text": "Hi", "output_path": str(out), "job_id": "j1", "word_count": 1}
+
+        estimator_predict_before = app.estimator.predict(1)
+        app._process_task(tts, task)
+
+        assert not out.exists()
+        assert "j1" not in app.expiration_timers
+        assert app.estimator.predict(1) == estimator_predict_before
 
 
 # --- _handle_segment_complete ----------------------------------------------

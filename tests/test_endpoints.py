@@ -110,6 +110,37 @@ class TestDeleteJob:
         assert resp.status_code == 204
         assert job_id not in app.long_form_jobs
 
+    def test_removes_registry_entry_and_cancels_timer(self, app, client, output_dir):
+        job_id = str(uuid.uuid4())
+        _write_wav(output_dir / f"{job_id}.wav")
+        app.register_job(job_id, kind="single", word_count=2)
+        app._schedule_expiration(job_id)
+        assert job_id in app.expiration_timers
+
+        resp = client.delete(f"/job/{job_id}")
+
+        assert resp.status_code == 204
+        assert job_id not in app.jobs
+        assert job_id not in app.expiration_timers
+
+    def test_purges_long_form_parent_and_segments(self, app, client, output_dir):
+        parent_id = str(uuid.uuid4())
+        seg_id = str(uuid.uuid4())
+        _write_wav(output_dir / f"{parent_id}.wav")
+        app.register_job(parent_id, kind="long_form_parent", word_count=4)
+        app.register_job(seg_id, kind="segment", word_count=4, parent_job_id=parent_id)
+        with app.long_form_lock:
+            app.long_form_jobs[parent_id] = {
+                "total": 1, "completed": 1, "status": "done", "segments": [seg_id],
+            }
+
+        resp = client.delete(f"/job/{parent_id}")
+
+        assert resp.status_code == 204
+        assert parent_id not in app.jobs
+        assert seg_id not in app.jobs
+        assert parent_id not in app.long_form_jobs
+
 
 # --- POST /generate/long-form -----------------------------------------------
 
@@ -174,9 +205,10 @@ class TestProgress:
             }
         resp = client.get(f"/job/{job_id}/progress")
         body = resp.get_json()
-        assert body == {
-            "job_id": job_id, "total": 5, "completed": 2, "status": "processing",
-        }
+        assert body["job_id"] == job_id
+        assert body["total"] == 5
+        assert body["completed"] == 2
+        assert body["status"] == "processing"
 
     def test_single_job_done(self, client, output_dir):
         job_id = str(uuid.uuid4())
@@ -185,6 +217,10 @@ class TestProgress:
         body = resp.get_json()
         assert body["status"] == "done"
         assert body["completed"] == 1 and body["total"] == 1
+        assert body["position"] in (0, None)
+        assert body["generation_seconds"] == 0
+        assert body["queue_seconds"] == 0
+        assert body["total_seconds"] == 0
 
     def test_single_job_processing(self, client, output_dir):
         job_id = str(uuid.uuid4())

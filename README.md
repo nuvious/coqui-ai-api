@@ -111,17 +111,47 @@ curl http://localhost:5000/job/70341b89-e5e5-4b38-bb6b-7f242498ed83 -o output.wa
 ```
 
 If the file isn't ready a 404 will be returned. You can also poll a job's progress
-(useful for long-form jobs):
+(useful for long-form jobs), which includes an estimated time to completion:
 
 ```bash
 curl http://localhost:5000/job/70341b89-e5e5-4b38-bb6b-7f242498ed83/progress
 ```
+
+```json
+{
+  "job_id": "70341b89-e5e5-4b38-bb6b-7f242498ed83",
+  "total": 1,
+  "completed": 0,
+  "status": "processing",
+  "position": 1,
+  "queue_seconds": 0.0,
+  "generation_seconds": 4.2,
+  "total_seconds": 4.2,
+  "expires_at": null
+}
+```
+
+`position` is the job's 1-based place in the queue (`1` means it's the one
+currently being synthesised; for a long-form job it's the position of its first
+still-pending segment). `queue_seconds` is the estimated wait before this job
+starts generating (including any remaining model-load time), `generation_seconds`
+is the estimated time to synthesise this job's own text, and `total_seconds` is
+their sum. The estimates start from seed constants and warm up as more jobs
+complete; like all other in-memory state, they reset on restart.
+
+`expires_at` is an ISO 8601 UTC timestamp (e.g. `2026-07-08T21:30:00Z`) once the job
+has finished (or errored); it's `null` before then, or always `null` if expiration
+is disabled. See [Job expiration](#job-expiration) below.
 
 Finally, you can clean up the space on the server using the delete endpoint:
 
 ```bash
 curl -X DELETE http://localhost:5000/job/70341b89-e5e5-4b38-bb6b-7f242498ed83
 ```
+
+Deleting a job also cancels its synthesis: if it's still queued the worker skips
+it entirely, and if it's already generating when the delete lands the result is
+discarded once synthesis finishes. Either way no WAV is left behind.
 
 #### Voice cloning with a specific sample
 
@@ -148,6 +178,33 @@ curl -X POST http://localhost:5000/generate/long-form \
 
 This returns a `job_id`; poll `/job/<id>/progress` until `status` is `done`, then
 download it from `/job/<id>`.
+
+#### Job expiration
+
+Finished and errored jobs are cleaned up automatically `JOB_EXPIRATION_SECONDS`
+seconds after they complete (default `300` = 5 minutes). The timer starts when the
+job finishes (or errors), not when you last polled it. Once a job expires, its WAV
+file(s) and all registry/progress state are removed: `GET /job/<id>` then returns
+`404` and `GET /job/<id>/progress` falls back to today's generic response for an
+unknown id, exactly as if the job had never existed.
+
+Set `JOB_EXPIRATION_SECONDS=0` (or any negative value) to disable expiration
+entirely; jobs then stay around until you `DELETE` them yourself.
+
+#### Health & readiness
+
+`GET /health` always returns `200 {"status": "ok"}` while the process is up.
+`GET /ready` returns `200` once the model has finished loading and the worker
+thread is alive, `503` otherwise:
+
+```bash
+curl http://localhost:5000/health
+curl http://localhost:5000/ready
+```
+
+```json
+{"model": "loaded", "worker": "alive", "queue_depth": 0}
+```
 
 ## Development
 
