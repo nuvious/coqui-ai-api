@@ -153,6 +153,15 @@ It runs, cheapest first, and fails on the first problem:
 it passes. Add a check by adding it to the Makefile, never to the workflow, so the
 two cannot drift.
 
+> [!NOTE]
+> `pip-audit` runs clean except for exactly two carried advisories,
+> **PYSEC-2026-2289** and **PYSEC-2026-2290**, passed to `--ignore-vuln` in the
+> `audit` target with their justification beside them. They are the fallout of the
+> `transformers==5.0.0` pin that `coqui-tts` 0.27.5 forces. This is the project's
+> only `pip-audit` ignore; the full reasoning and the condition for removing it
+> are in [DESIGN.md](DESIGN.md), "The transformers pin, and two accepted
+> advisories".
+
 `make verify` never rewrites files. Use `make format` for that.
 
 Two things are deliberately outside the gate:
@@ -313,6 +322,13 @@ and specific enough to be followed.
   The one legitimate way to run without authentication is the documented global
   switch, which is a deployment choice, not something a task should reach for to
   make a test pass.
+- **The `pip-audit` ignore list is closed.** The gate carries exactly two
+  ignores — PYSEC-2026-2289 and PYSEC-2026-2290 — justified and dated in
+  [DESIGN.md](DESIGN.md), "The transformers pin, and two accepted advisories". Do
+  not add a third to make a change pass, not even with a written justification. A
+  new advisory that blocks the gate is an escalation, the same as any other spec
+  gap. Removing the existing two once `coqui-tts` allows `transformers >= 5.5.0`
+  is expected and encouraged.
 - Follow the response-shape rule in [Code style & conventions](#code-style--conventions).
   The compatibility fields are frozen. Native shapes may evolve when recorded.
 - Prefer behavior-preserving refactors. When code must change to be testable, gate

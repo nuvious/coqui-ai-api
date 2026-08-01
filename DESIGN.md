@@ -200,6 +200,60 @@ The XTTS model weights still carry Coqui's non-commercial licence. The fork
 changes the maintenance story for the code, not the licence on the weights, so
 the disclaimer in `README.md` stands.
 
+### The transformers pin, and two accepted advisories
+
+Decided 2026-08-01, resolving an escalation from T-01-01-02.
+
+`coqui-tts` 0.27.5 and a `pip-audit`-clean `transformers` cannot both be
+satisfied at once. The conflict is upstream, not a mistake in this repository:
+
+- `coqui-tts` 0.27.5 imports `transformers.pytorch_utils.isin_mps_friendly`
+  unconditionally (in its tortoise layer). That symbol is present through
+  `transformers` **5.0.0** and was removed in **5.1.0**, so `from TTS.api import
+  TTS` only succeeds on `transformers <= 5.0.0`.
+- `pip-audit` reports four `transformers` advisories when the resolution lands
+  below their fixes. Two — PYSEC-2025-217 and PYSEC-2026-2288 — are fixed *by*
+  5.0.0. The other two are not fixed until later: **PYSEC-2026-2289** (fixed
+  5.3.0) and **PYSEC-2026-2290** (fixed 5.5.0).
+
+There is no release that both keeps `isin_mps_friendly` (`<= 5.0.0`) and clears
+the last two advisories (`>= 5.3.0`); the windows do not overlap. `coqui-tts`
+has no release past 0.27.5 to raise the floor, and the unconstrained resolution
+(`transformers` 5.9.0) audits clean but cannot import.
+
+This matters for the shipped artifact, not only the gate: once T-01-02-02 makes
+the container install from `uv.lock`, that one resolution is both what
+`pip-audit` audits and what the service runs. A "clean lock, working container"
+split is therefore not available; the single resolution has to serve both.
+
+**The decision: functionality wins, with a bounded, argued security exception.**
+An engine migration whose result is an engine that cannot load XTTS v2 fails at
+its own purpose, and both remaining advisories are in code paths this
+single-purpose inference service does not exercise.
+
+- **Pin `transformers==5.0.0`**, via `[tool.uv] constraint-dependencies` (since
+  `transformers` is transitive through `coqui-tts`, not a direct dependency).
+  5.0.0 specifically, **not** `<5`: 5.0.0 is the newest version that still has
+  `isin_mps_friendly`, and it already clears PYSEC-2025-217 and PYSEC-2026-2288,
+  which a 4.x resolution would still carry. The pin trades four advisories for
+  two.
+- **Ignore exactly two advisories in the gate**, each with its reachability
+  argument recorded next to the ignore:
+  - **PYSEC-2026-2289** — RCE via `Trainer`'s `torch.load`. This project never
+    trains; it only runs inference through `TTS.api`. `Trainer` is never imported.
+  - **PYSEC-2026-2290** — RCE loading LightGlue weights. This project only ever
+    loads XTTS v2. LightGlue (an image-matching model) is never loaded.
+
+This is a deliberate, narrow exception, not a new standing policy. It is the
+project's only `pip-audit` ignore, it is tied to this specific upstream
+incompatibility, and **it is to be removed the moment `coqui-tts` allows
+`transformers >= 5.5.0`** — whether by raising its floor or by dropping the
+tortoise `isin_mps_friendly` import. Adding any *other* ignore — including a
+third one here, should `pip-audit` ever report a different advisory at 5.0.0 — is
+a maintainer decision reached by escalation, not something a task may do to go
+green. The rule is stated for agents in `CONTRIBUTING.md`, "Additional rules for
+agents".
+
 ## Core design decisions
 
 ### One model, one worker, one queue

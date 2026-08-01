@@ -28,6 +28,15 @@ deviations" or "Open questions". This file is the short list.
 - **The image is not built from `uv.lock`.** The versions the gate audits are not
   the versions that ship.
 - **Python is capped below 3.12** by the `TTS==0.22.0` pin.
+- **The engine pins `transformers==5.0.0`, which carries two accepted CVEs.**
+  `coqui-tts` 0.27.5 cannot import on `transformers > 5.0.0` (it uses a symbol
+  removed in 5.1.0), and no `transformers` release both imports and audits fully
+  clean. The project pins 5.0.0 and ignores exactly two advisories in `pip-audit`:
+  **PYSEC-2026-2289** (Trainer `torch.load` RCE; this project never trains) and
+  **PYSEC-2026-2290** (LightGlue loader RCE; this project never loads LightGlue).
+  Both are in code paths XTTS-v2 inference does not exercise. To be removed when
+  `coqui-tts` allows `transformers >= 5.5.0`. Full reasoning in DESIGN.md, "The
+  transformers pin, and two accepted advisories".
 
 ## Testing
 
