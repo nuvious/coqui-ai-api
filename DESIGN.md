@@ -221,7 +221,7 @@ the last two advisories (`>= 5.3.0`); the windows do not overlap. `coqui-tts`
 has no release past 0.27.5 to raise the floor, and the unconstrained resolution
 (`transformers` 5.9.0) audits clean but cannot import.
 
-This matters for the shipped artifact, not only the gate: once T-01-02-02 makes
+This matters for the shipped artifact, not only the gate: once T-01-02-01 makes
 the container install from `uv.lock`, that one resolution is both what
 `pip-audit` audits and what the service runs. A "clean lock, working container"
 split is therefore not available; the single resolution has to serve both.
@@ -253,6 +253,52 @@ third one here, should `pip-audit` ever report a different advisory at 5.0.0 —
 a maintainer decision reached by escalation, not something a task may do to go
 green. The rule is stated for agents in `CONTRIBUTING.md`, "Additional rules for
 agents".
+
+### The runtime image base, and which PyTorch it ships
+
+Decided 2026-08-01, resolving an escalation from T-01-02-01. This settles two
+questions that were previously listed under [Open questions](#open-questions):
+what replaces `ghcr.io/coqui-ai/tts:v0.22.0`, and which PyTorch build the project
+installs.
+
+**The base is a slim image the project builds on, not a pre-built engine image.**
+The runtime image rebases onto a slim base — a `python:3.x-slim`, or a CUDA
+runtime image where system CUDA is wanted — and installs the stack from
+`uv.lock`, rather than layering the project onto Idiap's published `coqui-tts`
+image with `pip3 install .` on top.
+
+The rejected alternative was that pre-built Idiap image
+(`ghcr.io/idiap/coqui-tts-cpu` and its CUDA variants). It is less work, but it
+reintroduces the exact two [Known deviations](#known-deviations) this story
+exists to close: the shipped versions would again be the base image's rather than
+the ones `make verify`/`pip-audit` audit, and the image would again inherit a
+third party's un-audited vulnerability surface. It also cannot satisfy the
+story's "installs from `uv.lock`" requirement, and its CPU-only tag fails the GPU
+deployment target outright. The reason the fork unblocks the container at all
+([The engine dependency](#the-engine-dependency), above: the fork stopped
+bundling torch) is precisely what makes building on a slim base viable — choosing
+a pre-built image throws that away.
+
+**The base swap and the install-from-lock are one task, not two.** They are one
+physical change to one `Dockerfile`, and a slim base still carrying an
+unconstrained `pip3 install .` is a throwaway intermediate no one would ship, so
+sequencing them separately buys nothing. T-01-02-01 therefore owns both; the task
+that formerly held "install from `uv.lock`" on its own (T-01-02-02) is folded
+into it.
+
+**The shipped image ships a CUDA build of torch; the gate and dev container keep
+CPU.** GPU is the deployment target ([Purpose](#purpose): one machine, one GPU),
+so the production image resolves `torch`/`torchaudio`/`torchcodec` against a CUDA
+wheel index. The dev container and `make verify` stay on the CPU index
+(`download.pytorch.org/whl/cpu`, via `[tool.uv.sources]`) they already use,
+because the suite mocks the engine and must keep running with no GPU and no
+multi-gigabyte CUDA download. `uv.lock` holds one resolution per package unless
+extras are used deliberately, so the two are separated by a `cuda` extra (or an
+equivalent build-time index override) that only the image installs; the CPU
+resolution stays the default and the gate's. The exact mechanism is T-01-02-01's
+to implement — what is decided here is the direction, so that task does not have
+to escalate the same question again. **Do not make the gate depend on a CUDA
+wheel.**
 
 ## Core design decisions
 
@@ -349,6 +395,7 @@ a finding is worth re-checking.
 | OpenAI `/v1/audio/speech` as the compatibility dialect | [openai/openai-openapi](https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml), OpenAI's published spec | 2026-08-01 |
 | `Authorization: Bearer` for authentication | OWASP API security guidance prefers header bearer tokens over cookies for APIs; also what the compatibility dialect sends | 2026-08-01 |
 | `coqui-tts` (the Idiap fork) as the engine, not `TTS` | [idiap/coqui-ai-TTS](https://github.com/idiap/coqui-ai-TTS) and [PyPI](https://pypi.org/project/coqui-tts/); upstream `coqui-ai/TTS` unmaintained since Coqui AI shut down in January 2024 | 2026-08-01 |
+| Runtime image built on a slim base from `uv.lock`, not a pre-built engine image; shipped image ships CUDA torch, gate keeps CPU | Escalation from T-01-02-01, resolved against this document's own container-unblock reasoning under [The engine dependency](#the-engine-dependency); see [The runtime image base](#the-runtime-image-base-and-which-pytorch-it-ships) | 2026-08-01 |
 
 ### Decided against, by design
 
@@ -449,18 +496,11 @@ Each needs a decision before anything acts on it.
 Genuinely unresolved. An autonomous task that runs into one of these should
 escalate rather than guess.
 
-- What replaces `ghcr.io/coqui-ai/tts:v0.22.0`? Two candidates, neither costed:
-  an Idiap-published image (`ghcr.io/idiap/coqui-tts-cpu` and its CUDA variants),
-  or a slim base with the stack installed from `uv.lock` using the `cuda` extra.
-  The second is more work and gives the project control over what ships.
 - Does XTTS v2 voice cloning behave identically on `coqui-tts` 0.27.5? The import
   path and the model are the same, but nothing in this repository tests real
   synthesis, so a behavioural regression in the migration would not be caught by
   the gate. This is the same hole as the open question below, made pressing by a
   concrete change.
-- Which PyTorch does the project install, now that the engine no longer bundles
-  one? CPU and CUDA builds are different resolutions, and `uv.lock` can only hold
-  one unless extras are used deliberately.
 - Is real synthesis correctness tested anywhere? No test loads real weights, so
   a change that breaks actual audio generation would pass the gate. A real-model
   end-to-end check is noted as future work but has no home, no runner, and no

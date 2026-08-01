@@ -35,9 +35,10 @@ of the service.
   0.27.4, so `pyproject.toml` now declares `torch`, `torchaudio` and
   `torchcodec` directly, pinned to the CPU wheel index
   (`download.pytorch.org/whl/cpu`) via `[tool.uv.sources]`. `make install`
-  fetches them like any other dependency. This is a dev-container constraint,
-  not the project's production choice — see [DESIGN.md](DESIGN.md), "Open
-  questions", "Which PyTorch does the project install".
+  fetches them like any other dependency. This is the dev-container and gate
+  resolution, not what the shipped image runs: the production image ships a CUDA
+  build of torch (GPU is the deployment target), decided 2026-08-01 — see
+  [DESIGN.md](DESIGN.md), "The runtime image base, and which PyTorch it ships".
 - For actually generating audio: an NVIDIA GPU + drivers are recommended (CPU works
   but is slow), and the XTTS v2 model weights (downloaded automatically on first run).
   A GPU-accelerated `torch` is not what `make install` gives you; swapping the

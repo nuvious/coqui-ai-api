@@ -7,7 +7,7 @@ epic: EP-01
 story: US-01-02
 status: todo
 deps:
-- T-01-02-02
+- T-01-02-01
 scope:
 - DESIGN.md
 - KNOWN_ISSUES.md
