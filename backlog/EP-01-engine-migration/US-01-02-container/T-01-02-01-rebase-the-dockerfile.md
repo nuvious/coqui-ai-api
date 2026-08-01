@@ -5,7 +5,7 @@ schema_version: '2'
 title: Rebase the Dockerfile onto a slim base and install from uv.lock
 epic: EP-01
 story: US-01-02
-status: done
+status: reopened
 deps:
 - T-01-01-03
 scope:
@@ -98,3 +98,7 @@ this one, which is why this task now owns both the base swap and the lock instal
   deviations once the whole story is verified on the host.
 - The development container (`.devcontainer/Dockerfile`), which is a different
   image with a different job and is already on a slim base.
+
+## Review notes
+
+The Dockerfile does not build with its own default build arg, which fails this task's acceptance criteria 'The image builds. docker build -t coqui-ai-api:migrate . exits 0' and 'make smoke passes'. The CUDA reinstall step (Dockerfile ~line 37-41) sets `ARG TORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu121` and then runs `uv pip install --index-url "${TORCH_CUDA_INDEX_URL}" --reinstall "torch>=2.2" "torchaudio>=2.2" "torchcodec>=0.8.0"`. The cu121 index does not publish torchcodec>=0.8.0 (its newest is torchcodec 0.1.1+cu121; cu124 tops out at 0.2.1+cu124), so uv fails with 'No solution found when resolving dependencies: only torchcodec<=0.1.1+cu121 is available and you require torchcodec>=0.8.0'. torchcodec 0.8.0+ (the lock resolves 0.15.0) requires torch 2.9+, which cu121/cu124 predate. No build path passes a build-arg override, so this default is what actually ships: make smoke (`docker build -t ... .`), docker-compose.yaml's `build:` block, and .github/workflows/docker-build.yml all build with no --build-arg. Fix: raise the default CUDA index to a series that actually publishes the torch/torchcodec versions uv.lock resolves. cu126 resolves cleanly to the locked versions (torch 2.13.0+cu126, torchaudio 2.11.0+cu126, torchcodec 0.15.0+cu126); cu128 resolves but pulls torch 2.11.0 instead of the locked 2.13.0, so prefer cu126 unless there is a driver reason not to. Update the Dockerfile comment that calls cu121 'a recent CUDA build' accordingly, and confirm the change against DESIGN.md 'The runtime image base, and which PyTorch it ships' (which mandates a CUDA build of torch for the shipped image while the gate stays CPU - that direction is unaffected; only the concrete index is wrong). You can validate the fix WITHOUT Docker: in a project env synced to the lock, run `uv pip install --python <venv>/bin/python --index-url https://download.pytorch.org/whl/cu126 --reinstall --dry-run "torch>=2.2" "torchaudio>=2.2" "torchcodec>=0.8.0"` and confirm it produces a resolution instead of 'No solution found'. The actual `docker build` and `make smoke` still need a maintainer with Docker, as the task's IMPORTANT note says - but do not leave a default that provably cannot resolve. Re-run `make verify` after (it is unaffected, but confirm). Do not change [tool.uv.sources] or the CPU gate resolution; this is only the image's CUDA index default.
