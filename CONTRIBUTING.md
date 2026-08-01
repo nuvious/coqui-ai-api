@@ -71,18 +71,21 @@ The TTS model takes ~2 minutes to load before the first generation succeeds.
 ### Run with Docker
 
 ```bash
-# one-time: prime the BuildKit layer cache to avoid re-downloading 4.88 GB
-docker pull ghcr.io/coqui-ai/tts:v0.22.0
-
 docker compose up --build
 ```
 
 `docker-compose.yaml` mounts `workspace/` and `models/`, exposes port 5000, and
 enables all NVIDIA GPUs via the `deploy.resources.reservations` block. The
-Dockerfile uses plain `pip3 install .` (not uv) so the container has no uv
-dependency, which also means the image does not install from `uv.lock`. That is a
-known deviation with measurements recorded in [DESIGN.md](DESIGN.md); do not
-"fix" it without reading them.
+`Dockerfile` is a multi-stage build on `python:3.11-slim-bookworm`, not the old
+pre-built `ghcr.io/coqui-ai/tts` engine image. A builder stage installs uv and
+runs `uv sync --frozen --no-dev --no-editable` against `uv.lock` -- the same
+resolution `make verify`/`pip-audit` audits -- then reinstalls just
+`torch`/`torchaudio`/`torchcodec` from PyTorch's CUDA wheel index instead of the
+CPU one, since the shipped image's deployment target is a GPU host while the
+gate and dev container stay CPU-only (DESIGN.md, "The runtime image base, and
+which PyTorch it ships"). Only the builder stage has uv; the runtime stage
+copies the finished virtualenv and nothing else, so the shipped container has
+no uv dependency, same as before.
 
 ### Work in the development container
 
@@ -174,9 +177,11 @@ Two things are deliberately outside the gate:
   `make verify` keeps working with no network. Its quality gate fails the run on
   push; pull requests get decoration only, per SonarSource's guidance.
 - **`make smoke`** builds the runtime image and checks it serves `/health` and the
-  OpenAPI spec. It is not in CI because the 16.9 GB base image is at or over the
-  free disk a standard GitHub-hosted runner has. Run it locally after changing the
-  `Dockerfile` or the entrypoint.
+  OpenAPI spec. It is not in CI: that started as a disk-space limit from the old
+  16.9 GB pre-built base, and whether the slim base now fits a standard
+  GitHub-hosted runner is measurement T-01-02-03 owns, not decided here (see
+  DESIGN.md, "Known deviations"). Run it locally after changing the `Dockerfile`
+  or the entrypoint.
 
 ## Testing
 

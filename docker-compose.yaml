@@ -1,14 +1,21 @@
 services:
   coqui-ai-api:
+    # No cache_from: the old value primed the build cache from
+    # ghcr.io/coqui-ai/tts:v0.22.0, the pre-built engine image the Dockerfile no
+    # longer builds FROM (see DESIGN.md, "The runtime image base, and which
+    # PyTorch it ships"). Docker's normal build cache is enough for a slim base.
     build:
       context: .
-      cache_from:
-        - ghcr.io/coqui-ai/tts:v0.22.0
     ports:
       - "5000:5000"
     volumes:
       - ./workspace:/workspace
       - ./models:/root/.local/share/tts
+    # Unchanged against the new base: the GPU comes from the host's NVIDIA
+    # driver via the NVIDIA Container Toolkit, not from anything baked into the
+    # image. The slim base carries no CUDA runtime itself; the CUDA build of
+    # torch installed at build time brings its own CUDA userspace libraries as
+    # pip dependencies, so this reservation is still what makes the GPU visible.
     deploy:
       resources:
         reservations:
