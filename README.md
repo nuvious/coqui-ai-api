@@ -39,7 +39,7 @@ The configuration file takes the below format:
 # See https://docs.coqui.ai/en/latest/#docker-image to see how to enumerate them
 model_name: tts_models/multilingual/multi-dataset/xtts_v2
 # TTS Params for tts_to_file
-# https://github.com/coqui-ai/TTS/blob/dbf1a08a0d4e47fdad6172e433eeb34bc6b13b4e/TTS/api.py#L290
+# https://github.com/idiap/coqui-ai-TTS/blob/main/TTS/api.py
 tts_to_file_params:
   language: en
 # Specify CORS options: https://corydolphin.com/flask-cors/extension/

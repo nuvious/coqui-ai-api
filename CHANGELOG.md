@@ -48,6 +48,13 @@ The version itself lives in `pyproject.toml` and nowhere else; see
 
 ### Changed
 
+- The project now depends on `coqui-tts`, the actively maintained fork of the
+  TTS engine, instead of the unmaintained `TTS==0.22.0`. This lifts the
+  supported Python range to `>=3.10,<3.15` (previously capped below 3.12) and
+  means PyTorch is no longer bundled with the engine: `torch`, `torchaudio`,
+  and `torchcodec` are now declared and installed as ordinary dependencies.
+  The container image is rebuilt on a slim Python base and installs from the
+  project's own lockfile rather than a pre-built, multi-gigabyte engine image.
 - The version has one source of truth. `pyproject.toml` holds it; the package
   reads it from installed metadata and the OpenAPI spec reports it. Previously
   it lived in three places and had already drifted, with the spec advertising
