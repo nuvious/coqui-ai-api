@@ -34,6 +34,12 @@ explicit in `pyproject.toml` instead of leaving it to chance.
       roughly a minute. State the before and after in the task result.
 - [ ] `uv run python -c "import torch"` behaves as the chosen arrangement
       intends, and the result says which behaviour was intended and why.
+- [ ] `uv run python -c "from TTS.api import TTS; print(TTS.__module__)"` succeeds.
+      This is the runtime import that T-01-01-01 deferred: `coqui-tts` 0.27.5 raises
+      `ImportError` at import time without torch, so the import can only be proven
+      once this task declares torch. If it still fails after torch is declared, the
+      failure is the finding, not something to work around. `DESIGN.md`, "The engine
+      dependency", records the guard.
 - [ ] `CONTRIBUTING.md`, "Prerequisites", tells a contributor what they now need
       to install by hand, if anything changed.
 

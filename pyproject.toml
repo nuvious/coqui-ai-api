@@ -12,7 +12,7 @@ dependencies = [
     "flask-openapi3[elements,rapidoc,rapipdf,redoc,scalar,swagger]==4.2.1",
     "gunicorn==23.0.0",
     "pyyaml==6.0.2",
-    "tts==0.22.0",
+    "coqui-tts==0.27.5",
 ]
 
 [project.scripts]

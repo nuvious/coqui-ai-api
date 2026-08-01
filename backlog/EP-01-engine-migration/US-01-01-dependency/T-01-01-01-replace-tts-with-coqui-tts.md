@@ -5,7 +5,7 @@ schema_version: '2'
 title: Replace the tts dependency with coqui-tts
 epic: EP-01
 story: US-01-01
-status: blocked
+status: todo
 deps: []
 scope:
 - pyproject.toml
@@ -31,8 +31,14 @@ bundling it at 0.27.4. Both are correct. Putting PyTorch back is T-01-01-02.
 - [ ] `grep -c 'tts==0.22.0' pyproject.toml` returns 0, and `coqui-tts` appears
       in `[project].dependencies` with an explicit version constraint.
 - [ ] `uv lock` runs clean and `uv.lock` is committed with the change.
-- [ ] `uv run python -c "from TTS.api import TTS; print(TTS.__module__)"`
-      succeeds, proving the import path survived the fork.
+- [ ] The `TTS.api` module path survived the fork, proven **statically** (without
+      executing the package):
+      `uv run python -c "import importlib.metadata as m; assert any(str(f) == 'TTS/api.py' for f in m.files('coqui-tts')); print('TTS/api.py present')"`
+      succeeds. The literal runtime `from TTS.api import TTS` is deliberately **not**
+      checked here: `coqui-tts` 0.27.5 raises `ImportError` at import time when torch
+      is absent, and torch is out of scope for this task (see below). That runtime
+      import is proven in T-01-01-02, once torch is declared. `DESIGN.md`, "The
+      engine dependency", records why.
 - [ ] `make verify` passes end to end, including `pip-audit`.
 - [ ] If `pip-audit` reports advisories that the old pin was masking, they are
       listed in the task result rather than silenced.

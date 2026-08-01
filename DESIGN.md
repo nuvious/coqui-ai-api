@@ -156,13 +156,34 @@ What changes, measured against the `TTS==0.22.0` this project pins today:
 | `requires-python` | `<3.12` | `>=3.10,<3.15` |
 | `transformers` | 4.36 | `>=4.57` |
 | PyTorch | bundled, CUDA-matched | not bundled since 0.27.4, installed separately |
-| Import path | `from TTS.api import TTS` | unchanged |
+| Import path | `from TTS.api import TTS` | module path unchanged, but see the import-time torch guard below |
 | Images | `ghcr.io/coqui-ai/tts:v0.22.0`, 16.9 GB, 2023-era | `ghcr.io/idiap/coqui-tts-cpu` and CUDA variants |
 
 Two of those matter more than the rest.
 
 The import path is unchanged, so the worker code in `app.py` is expected to need
 no change. This is a dependency and packaging migration, not a rewrite.
+
+One thing did change about the import, and it caught an autonomous run by surprise
+on 2026-08-01, so it is recorded here. The *module path* is unchanged
+(`from TTS.api import TTS` still names the same package), but `coqui-tts` 0.27.5
+added a guard at the top of `TTS/__init__.py` that raises `ImportError` at import
+time when PyTorch is absent (`if not is_torch_available()...: raise
+ImportError(PYTORCH_IMPORT_ERROR)`). `TTS 0.22.0` bundled torch, so this guard
+never fired; the fork does not bundle torch, so it fires until the task that
+declares torch (T-01-01-02) runs. The consequence is sequencing,
+not a defect: `from TTS.api import TTS` cannot execute successfully in the window
+between dropping the old pin (T-01-01-01) and declaring torch (T-01-01-02), and
+any check meant to run in that window must prove the *module path* survived the
+fork without executing the package. The wheel's own file list does that: `TTS/api.py`
+appears in `importlib.metadata.files("coqui-tts")` without importing anything. The
+literal runtime import is proven once torch exists, in T-01-01-02.
+
+This reinforces rather than complicates [The heavy imports are deferred](#the-heavy-imports-are-deferred):
+importing `TTS` was already something only the worker thread does, and it was
+already true that the worker cannot run without torch. What is new is that the
+import now *fails loudly* without torch instead of only failing when the model is
+used.
 
 PyTorch no longer being bundled is what unblocks the container. The reason the
 image could not be built from `uv.lock` was that the base image shipped its own
