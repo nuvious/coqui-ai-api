@@ -5,7 +5,7 @@ schema_version: '2'
 title: Lift the Python ceiling from 3.12 to 3.15
 epic: EP-01
 story: US-01-01
-status: todo
+status: done
 deps:
 - T-01-01-02
 scope:

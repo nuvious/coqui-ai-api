@@ -24,16 +24,10 @@ of the service.
 
 ### Prerequisites
 
-- **Python `>=3.10,<3.12`.** The upper bound is enforced by `TTS==0.22.0` at build
-  time, so a 3.12+ interpreter will not be able to install the project. The lower
-  bound is real too: the code uses PEP 604 unions (`float | None`) in
-  runtime-evaluated annotations, which 3.9 cannot execute.
-
-  > [!NOTE]
-  > The upper bound is expected to move. The project is migrating from the
-  > unmaintained `TTS` package to `coqui-tts`, the Idiap-maintained fork, which
-  > supports `>=3.10,<3.15`. See [DESIGN.md](DESIGN.md), "The engine dependency".
-  > This section describes what installs today.
+- **Python `>=3.10,<3.15`.** The upper bound matches what `coqui-tts` declares
+  in its own package metadata. The lower bound is real: the code uses PEP 604
+  unions (`float | None`) in runtime-evaluated annotations, which 3.9 cannot
+  execute.
 - **[uv](https://docs.astral.sh/uv/)** for dependency and environment management
   (`pyproject.toml` + `uv.lock`).
 - **make**, which is how the gate is run.

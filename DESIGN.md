@@ -417,9 +417,6 @@ Each needs a decision before anything acts on it.
   `ghcr.io/coqui-ai/tts:v0.22.0`. See [The engine dependency](#the-engine-dependency)
   for what is meant instead. The four deviations below are all downstream of this
   one and are expected to resolve with it.
-- **`TTS==0.22.0` pins the Python ceiling at `<3.12`** and, transitively, an
-  entire 2023-era ML stack. `requires-python` in `pyproject.toml` carries that
-  ceiling today. `coqui-tts` 0.27.5 raises it to `<3.15`.
 - **The container image is not built from `uv.lock`.** `make verify` audits the
   locked resolution; the image resolves fresh at build time, so the versions
   audited are not the versions shipped. Measured on 2026-07-30: constraining the
