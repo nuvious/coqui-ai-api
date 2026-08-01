@@ -5,7 +5,7 @@ schema_version: '2'
 title: Replace the tts dependency with coqui-tts
 epic: EP-01
 story: US-01-01
-status: todo
+status: done
 deps: []
 scope:
 - pyproject.toml
