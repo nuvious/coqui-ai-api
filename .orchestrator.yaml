@@ -1,0 +1,127 @@
+# Orchestrator configuration. This file is also the marker: the tool finds the repository root by
+# walking up until it sees it.
+
+# Versions this file's own schema. `orchestrator` migrates an older (or absent) value forward on
+# load and writes the result back here, uncommitted, so you review it like any other change.
+schema_version: 3
+
+project:
+  name: coqui-ai-api
+
+  # The specification. Every prompt points at these, and an escalation is resolved by editing one
+  # of them, so `covers` is not decoration: it is the routing table the interviewing session uses
+  # to decide where an answer belongs.
+  spec_docs:
+    - path: DESIGN.md
+      covers: design and product decisions
+    - path: CONTRIBUTING.md
+      covers: standards, process, and rules for agents (the dev/agent guide)
+    - path: README.md
+      covers: user-facing behavior (the end-user guide)
+
+  backlog_dir: backlog
+
+execution:
+  # compose: sessions run inside the dev container. The default, and the safe one.
+  # local:   sessions run directly on this machine. Requires `sandbox: none` below, because
+  #          --dangerously-skip-permissions with no container around it is a real decision.
+  backend: compose
+  compose_file: docker-compose.dev.yml
+  service: dev
+  workdir: /workspace
+  # sandbox: none
+
+# Run by the orchestrator itself after every task session. The agent's own claim that it passed is
+# never trusted: the claim is a claim, and this is the evidence.
+gate:
+  command: make verify
+  timeout_seconds: 1800
+  # Optional and opt-in: a regex over the gate's failure output, narrowing a captured failure to
+  # its signal lines before it reaches a retry prompt. Unset or non-matching leaves today's
+  # raw-tail behavior unchanged.
+  # failure_filter: "AssertionError|FAILED"
+
+# Each phase below is a bare model name, or an object of `model` plus an optional `effort`
+# (one of low, medium, high, xhigh, max: the `claude` CLI's own `--effort` levels). `task` also
+# accepts an optional `retry_effort`, used only for its gate-failure retry attempt. Leaving
+# `effort`/`retry_effort` unset omits `--effort` from that invocation entirely.
+models:
+  task: sonnet # Executes individual tasks.
+  plan: opus # Decomposes an epic's stories into tasks.
+  review: opus # Reviews a finished epic against the specification.
+  escalate: opus # Interviews you when something is uncovered.
+
+# Prompt fragments. Each is `path` or `path#section-anchor`, relative to the repo root. The named
+# section is extracted and inlined verbatim into the prompt, so the rules live in one place and the
+# agent still reads them. A rule that is one hop away is a rule that does not exist.
+prompts:
+  house_rules: CONTRIBUTING.md#additional-rules-for-agents
+  review_checklist: .orchestrator/review-checklist.md
+
+  # A directory of hand-written tasks the planner studies for tone, size, and precision. Worth more
+  # than any amount of instruction about what a good task looks like.
+  planning_reference: backlog/EP-01-engine-migration
+
+git:
+  # Required: no default. Every epic branches from it, every task branches from the epic branch,
+  # and a wrong guess would branch and merge against the wrong history.
+  # `dev`, not `main`. Repo evidence, checked 2026-08-01: every feature branch in
+  # the history merges into `dev` (PRs #4, #7, #8, #10, #12, #15, #17, #18), and
+  # `main` receives `dev` for release. `docker-build.yml` publishes the image on
+  # push to `main`, which is what makes `main` the release branch rather than the
+  # integration one. Epics branch from and land on the integration branch.
+  main_branch: dev
+  delete_merged_branches: true
+
+  # What happens to an epic branch once its review passes:
+  #   manual: stop. The branch is left unmerged; merge it yourself, then run again. The default.
+  #   auto:   merge it into main_branch immediately and continue with the next epic.
+  #   pr:     push it and open a PR with `gh`, then stop and wait for the PR to be merged.
+  epic_landing: manual
+
+  # A commit staging more files than this is refused. `git add -A` trusts .gitignore, and
+  # .gitignore is only as good as your guess about what the toolchain drops in the working tree.
+  # No legitimate task touches hundreds of files.
+  max_commit_files: 400
+
+# Paths a dirty working tree is checked against before `run` starts. Shipped here at its default
+# ([project.backlog_dir]) so a fresh config is already fully-specified; removing this whole section
+# still resolves to that same default, so it is safe to delete rather than comment out.
+dirty_check:
+  paths:
+    - backlog
+
+# Plan limit awareness. Checked before every session: task, retry, plan, and review.
+#
+# A session (5-hour) limit at 100% is waited out with a countdown, and the run resumes by itself.
+# A weekly limit at 100% halts the run, because the reset can be days away and continuing would
+# spend extra-usage credits.
+#
+# Both limits are allowed to reach 100%. A task that starts at 99% will finish on credits, because
+# a running Claude session cannot be paused. That spill is accepted; the alternative is leaving
+# plan capacity unused.
+#
+# The endpoint behind this (GET /api/oauth/usage) is undocumented. If it fails, the run halts
+# rather than spending a budget it cannot see. Override with --no-usage-check.
+usage:
+  enabled: true
+  poll_seconds: 60
+  grace_seconds: 30
+
+# Environment freshness check: whether the skills installed in ~/.claude/skills and this package
+# still agree, and (best effort) whether a newer release exists upstream, surfaced before a run
+# starts. Off by default. Override for a single invocation with --no-update-check.
+update_check:
+  enabled: false
+
+limits:
+  # A task that fails its gate is retried once with the failure output as context. A second failure
+  # is treated as a specification problem, not a coding problem, and escalates.
+  max_retries: 1
+
+  # Ceilings on a single session, so a confused agent cannot burn tokens indefinitely.
+  max_turns: 80
+  session_timeout_seconds: 3600
+
+# Pause after an epic's tasks are generated so you can read them before any code is written.
+approve_plans: true

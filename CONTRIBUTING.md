@@ -1,13 +1,14 @@
 # Contributing to coqui-ai-api
 
-Thanks for your interest in improving **coqui-ai-api** — a REST API wrapper around
-the [Coqui-AI TTS](https://github.com/coqui-ai/TTS) engine (XTTS v2) with voice
-cloning, an async job queue, and a minimal web UI.
+Thanks for your interest in improving **coqui-ai-api**, a REST API wrapper around
+the [Coqui TTS](https://github.com/idiap/coqui-ai-TTS) engine (XTTS v2). It does
+voice cloning behind an async job queue, with a minimal web UI on top.
 
-> [!WARNING]
-> Pending confirmation. Sections covering the gate, releases, the development
-> container, and code style were drafted on 2026-07-30 and have not yet been
-> reviewed by the user.
+> [!NOTE]
+> The gate, dev container and code style sections were written on 2026-07-30 from
+> the existing codebase. The release, code style and AI agent sections were
+> revised on 2026-08-01 following a direction change recorded in
+> [DESIGN.md](DESIGN.md).
 
 This document is the single source of truth for how to develop, test, and ship
 changes. It is written for humans first; an [automated-agent section](#for-ai-agents)
@@ -25,6 +26,12 @@ of the service.
   time, so a 3.12+ interpreter will not be able to install the project. The lower
   bound is real too: the code uses PEP 604 unions (`float | None`) in
   runtime-evaluated annotations, which 3.9 cannot execute.
+
+  > [!NOTE]
+  > The upper bound is expected to move. The project is migrating from the
+  > unmaintained `TTS` package to `coqui-tts`, the Idiap-maintained fork, which
+  > supports `>=3.10,<3.15`. See [DESIGN.md](DESIGN.md), "The engine dependency".
+  > This section describes what installs today.
 - **[uv](https://docs.astral.sh/uv/)** for dependency and environment management
   (`pyproject.toml` + `uv.lock`).
 - **make**, which is how the gate is run.
@@ -182,16 +189,28 @@ The conventions the tools cannot check, and which matter more:
 - **Never hold two of the four module locks at once** (`jobs_lock`,
   `long_form_lock`, `expiration_timers_lock`, `worker_state_lock`).
   `tests/test_lock_ordering.py` exists because this was violated once already.
-- **Keep endpoint response shapes stable.** They are a public contract, not an
-  implementation detail.
+- **Endpoint response shapes are a contract at two strengths.** The OpenAI
+  compatibility fields (`/v1/audio/speech`) are frozen: they are defined by a
+  specification this project does not control, so a deviation is a broken client.
+  Native endpoint shapes may evolve when the change is recorded in the API surface
+  table below and in `CHANGELOG.md`. Additive changes are always allowed. See
+  [DESIGN.md](DESIGN.md) for why this is looser than it used to be.
 - **The version lives in `pyproject.toml` and nowhere else.** Read it from
   `coqui_ai_api.__version__`, which comes from installed package metadata.
   `tests/test_version.py` enforces this.
 
 ## Releases
 
-The project uses [semantic versioning](https://semver.org/spec/v2.0.0.html), and
-is distributed as GitHub release artifacts. To cut a release:
+The project uses [semantic versioning](https://semver.org/spec/v2.0.0.html).
+
+The **container image on `ghcr.io/nuvious/coqui-ai-api` is the primary
+distribution channel.** It is published automatically on push to `main` by
+`.github/workflows/docker-build.yml`, which requires the verify workflow to pass
+first and tags the image with the version read from `pyproject.toml`. Nothing
+manual is needed to publish it.
+
+GitHub release artifacts (wheel and sdist) are a secondary channel and are still
+attached by hand. To cut a release:
 
 1. Make sure `make verify` passes on the branch to be released.
 2. Bump `version` in `pyproject.toml`. **This is the only place the version
@@ -208,9 +227,8 @@ is distributed as GitHub release artifacts. To cut a release:
 > `0.1.1` has been the in-development version in the manifest since 2025-08-25
 > but was never tagged. The last actual release is `0.1.0`.
 
-Container image publication to `ghcr.io` currently happens automatically on push
-to `main`, but is under re-evaluation rather than being the committed distribution
-model. See [DESIGN.md](DESIGN.md).
+A tag-triggered workflow to build and attach those artifacts automatically is
+[future work](DESIGN.md#future-work), not something that exists today.
 
 ## Submitting changes
 
@@ -225,21 +243,42 @@ model. See [DESIGN.md](DESIGN.md).
 
 ## For AI agents
 
-> **Rule 0 — documentation is part of "done".** Any task you complete MUST include a
+> **Rule 0: documentation is part of "done".** Any task you complete MUST include a
 > check of, and an update (if necessary) to, both the user-facing documentation
 > (`README.md`) and the developer/agent-facing documentation (this `CONTRIBUTING.md`).
 > A change is not complete until the docs reflect it.
 
-Additional house rules for automated contributors:
+### Additional rules for agents
 
-- **Run `make verify` before declaring a task done.** It is the gate: your claim
+These are inlined verbatim into every autonomous session prompt by
+`.orchestrator.yaml` (`prompts.house_rules`). Keep them short enough to be read
+and specific enough to be followed.
+
+- **Run `make verify` before declaring a task done.** It is the gate. Your claim
   that the work is correct is a claim, its exit code is the evidence. Do not
   lower the coverage threshold, add a mypy override for this project's own code,
   or widen a flake8 ignore to make a change pass.
-- **Do not run git.** Branches, commits, and history are the maintainer's, not
-  yours.
-- Preserve existing endpoint behavior and response shapes unless explicitly asked to
-  change them; treat them as a public contract.
+- **Git: commit on your own task branch, nothing else.** You may run `git add`
+  and `git commit` on the branch the orchestrator put you on, and you may read
+  history freely (`log`, `diff`, `blame`, `show`, `status`). You may not create
+  or switch branches, merge, push, tag, or rewrite history (`rebase`, `reset
+  --hard`, `push --force`). Merging and pushing belong to the maintainer on the
+  host.
+
+  > [!NOTE]
+  > This is a deliberate override of the backlog-orchestrator default, which
+  > forbids agents from running git at all. The trade is recorded in
+  > [DESIGN.md](DESIGN.md). If you escalate partway through a task, say plainly
+  > in the escalation what you have already committed, because the orchestrator
+  > cannot infer it.
+
+- **Never weaken the security posture.** Do not add a route that skips
+  authentication, do not widen the CORS allowlist, and never log or echo a token.
+  The one legitimate way to run without authentication is the documented global
+  switch, which is a deployment choice, not something a task should reach for to
+  make a test pass.
+- Follow the response-shape rule in [Code style & conventions](#code-style--conventions).
+  The compatibility fields are frozen. Native shapes may evolve when recorded.
 - Prefer behavior-preserving refactors. When code must change to be testable, gate
   side effects behind flags/functions rather than deleting functionality.
 - **If the specification does not answer your question, stop and say so.** Read
@@ -248,10 +287,10 @@ Additional house rules for automated contributors:
   it is worse than halting: the resolution to a genuine gap is an edit to these
   documents, so a question answered only in chat will be asked again next session.
 - You have no network access. That is how the run loop is meant to work, not a
-  gap in the specification: follow the standards already recorded here and in
-  DESIGN.md rather than escalating because you cannot check a source. Note that
-  it does mean you cannot read the GitHub issue tracker, which is this project's
-  known-issues record.
+  gap in the specification. Follow the standards already recorded here and in
+  DESIGN.md rather than escalating because you cannot check a source. It also
+  means you cannot read the GitHub issue tracker, so `KNOWN_ISSUES.md` in the
+  repository root is the copy you can read.
 
 ### Architecture
 
@@ -298,7 +337,7 @@ models/           # mounted at /root/.local/share/tts in Docker
 `app.py` starts a single background daemon thread (`tts_worker`) at import,
 **unless** `COQUI_AI_API_START_WORKER=0`. The worker lazily imports `torch`/`TTS`,
 holds the one model instance, and processes jobs from `text_queue` (a
-`queue.Queue`) serially — this keeps VRAM usage predictable. `POST /generate`
+`queue.Queue`) serially, which keeps VRAM usage predictable. `POST /generate`
 enqueues a job and returns a UUID immediately; the client polls
 `GET /job/<id>` (or `GET /job/<id>/progress`) until the file is ready.
 
@@ -318,7 +357,7 @@ monotonic enqueue sequence number. `register_job`, `mark_processing`, `mark_done
 `set_current_job`/`clear_current_job` calls. `position(job_id)` returns the 1-based
 queue position (the in-flight job is position 1), the position of a long-form
 parent's first still-pending segment, or `0`/`None` for a done/unknown job. This
-registry is additive — `long_form_jobs` (used by `/job/<id>/progress`) is unchanged.
+registry is additive. `long_form_jobs` (used by `/job/<id>/progress`) is unchanged.
 
 Registry membership also doubles as the cancellation signal for `DELETE /job/<id>`
 (there is no separate "cancelled" status or tombstone). `_process_task` checks
@@ -334,7 +373,7 @@ long-form segments for free, since deleting a parent removes its segments from
 
 **Lock ordering.** Four locks guard module-level state: `jobs_lock`,
 `long_form_lock`, `expiration_timers_lock`, and `worker_state_lock`. Never hold
-more than one of them at a time — code must not acquire a second lock while
+more than one of them at a time. Code must not acquire a second lock while
 already holding another. `_schedule_expiration` and `_expire_job` acquire
 `jobs_lock` internally, so they must always be called with no other lock held;
 `_handle_segment_complete` sets the outcome inside its `with long_form_lock`
@@ -369,12 +408,12 @@ by `expiration_timers_lock`), and stamps an ISO 8601 UTC `expires_at` onto the
 job's registry entry (surfaced by `/job/<id>/progress` via `_progress_eta_fields`).
 When the timer fires, `_expire_job(job_id)` removes the job (and, for a long-form
 parent, all of its segments) from `jobs`, from `long_form_jobs`, and deletes its
-WAV file(s) from disk — gathering what to remove under the locks first, then doing
+WAV file(s) from disk, gathering what to remove under the locks first, then doing
 file I/O outside them, mirroring `_handle_segment_complete`. There is no
 "expired" status and no tombstone: an expired job then reads exactly like an
 unknown id (`GET /job/<id>` 404s, `/progress` falls back to its existing
 generic response). `_expire_job` is idempotent and safe to call for an
-unknown/already-removed id, which is also how `DELETE /job/<id>` is implemented —
+unknown/already-removed id, which is also how `DELETE /job/<id>` is implemented:
 it calls `_cancel_expiration(job_id)` to stop any pending timer, then
 `_expire_job(job_id)`. Since in-memory timers don't survive a restart,
 `_sweep_orphan_wavs()` runs once at startup (when the worker is enabled) to delete

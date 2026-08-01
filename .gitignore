@@ -11,3 +11,7 @@ __pycache__
 coverage.json
 htmlcov/
 .pytest_cache/
+
+# Orchestrator scratch state: a channel between processes, not project state.
+.orchestrator/
+!.orchestrator/review-checklist.md

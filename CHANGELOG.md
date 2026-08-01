@@ -39,6 +39,12 @@ The version itself lives in `pyproject.toml` and nowhere else; see
   still starts and serves.
 - Contributor scaffolding: `DESIGN.md`, this changelog, a pull request template,
   and issue forms.
+- `KNOWN_ISSUES.md`, an offline-readable summary of what is known and not fixed.
+  GitHub Issues stays the record for humans; this is the copy an autonomous agent
+  can read, since it has no network access.
+- A backlog under `backlog/` and an `.orchestrator.yaml`, putting the project on
+  the backlog-orchestrator process. The first three epics are the engine
+  migration, the OpenAI-compatible endpoint, and a security review.
 
 ### Changed
 
@@ -54,6 +60,14 @@ The version itself lives in `pyproject.toml` and nowhere else; see
 - The coverage threshold rose from 80% to 95% (actual coverage is 98.45%).
 - SonarQube's quality gate now fails the workflow on push instead of being
   commented out, and the image is not published unless the gate passes.
+- The container image on `ghcr.io` is now the committed primary distribution
+  channel rather than something under re-evaluation. Wheel and sdist release
+  artifacts remain a secondary channel.
+- `DESIGN.md` records a new direction: the service is to speak OpenAI's
+  `/v1/audio/speech` dialect so standard clients and agents can use it unmodified,
+  and to support authentication so it can be exposed beyond a trusted network.
+  Authentication is optional by design, for homelab deployments. None of this is
+  implemented yet; the document records the intent and the code does not match it.
 
 ### Removed
 

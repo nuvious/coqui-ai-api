@@ -1,13 +1,13 @@
-# Coqui-AI Docker
+# coqui-ai-api
 
-A quick containerization of [Coqui-AI TTS](https://github.com/coqui-ai/TTS)
-with an API for integration with other tools and services.
+A self-hosted REST API around the [Coqui TTS](https://github.com/idiap/coqui-ai-TTS)
+engine (XTTS v2), for integration with other tools and services. Voice cloning
+runs behind an async job queue, with a minimal web UI on top.
 
-
-> ⚠️ <strong style="color:red">WARNING:</strong> This 
-> containerization automatically agrees to the license 
-> requirements of the coqui-ai project for the purposes of 
-> functionality. If using this for a commercial use, 
+> [!WARNING]
+> This containerization automatically agrees to the license requirements of the
+> coqui-ai project for the purposes of functionality. If using this for a
+> commercial use,
 > [contact the coqui-ai project on how to obtain a commercial license](https://docs.coqui.ai/en/latest/models/xtts.html#contact).
 
 ## Demo
@@ -211,3 +211,8 @@ curl http://localhost:5000/ready
 Contributions are welcome. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for how to set
 up a development environment, run the test suite, and the project's coverage
 requirements.
+
+What the project is meant to be, and what has been deliberately decided about it,
+lives in **[DESIGN.md](DESIGN.md)**. Read that before proposing a change to the
+shape of the service. Its open questions and known deviations are the fastest way
+to tell a bug from a decision.
