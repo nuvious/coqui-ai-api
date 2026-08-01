@@ -70,6 +70,10 @@ The version itself lives in `pyproject.toml` and nowhere else; see
 - The container image on `ghcr.io` is now the committed primary distribution
   channel rather than something under re-evaluation. Wheel and sdist release
   artifacts remain a secondary channel.
+- CI comments (`Makefile`, `.github/workflows/docker-build.yml`) no longer
+  describe the retired `TTS==0.22.0` image's 16.9 GB size and Trivy scan
+  findings as current. They now read as a pre-migration baseline, pending
+  remeasurement of the slim-base image that replaced it.
 - `DESIGN.md` records a new direction: the service is to speak OpenAI's
   `/v1/audio/speech` dialect so standard clients and agents can use it unmodified,
   and to support authentication so it can be exposed beyond a trusted network.

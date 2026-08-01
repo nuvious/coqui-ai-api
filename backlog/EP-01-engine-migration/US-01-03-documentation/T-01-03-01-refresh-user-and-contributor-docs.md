@@ -5,7 +5,7 @@ schema_version: '2'
 title: Refresh the user and contributor docs for the new engine
 epic: EP-01
 story: US-01-03
-status: reopened
+status: done
 deps:
 - T-01-02-01
 scope:

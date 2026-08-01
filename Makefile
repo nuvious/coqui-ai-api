@@ -70,8 +70,11 @@ verify: format-check lint typecheck test audit
 
 # Catches the class of break the unit tests structurally cannot: a Dockerfile or
 # entrypoint that no longer works. Deliberately NOT part of `verify` and not run
-# in CI: the base image is 16.9 GB, which is at or over the free disk a standard
-# GitHub-hosted runner has. Run it on a machine that already has the base layer.
+# in CI: this started as a disk-space limit from the old 16.9 GB pre-built base,
+# now historical. Whether the slim base now fits a standard GitHub-hosted
+# runner's free disk is unmeasured, maintainer-run future work (DESIGN.md,
+# "Future work", "Measure and scan the migrated image"). Run it locally after
+# changing the Dockerfile or the entrypoint.
 SMOKE_IMAGE ?= coqui-ai-api:smoke
 SMOKE_PORT ?= 15000
 smoke:

@@ -1,11 +1,14 @@
 name: Build and Push Docker Image
 
-# NOTE: image publication is under re-evaluation (see DESIGN.md, "Future work").
-# The base image is 16.9 GB, which is at or over the disk a standard GitHub-hosted
-# runner has free, and a 2026-07-30 Trivy scan of the shipped image found 435 HIGH
-# and 24 CRITICAL findings inherited from it. This workflow is left running as it
-# was, with two corrections: it no longer reads the deleted VERSION file, and it
-# cannot publish unless the gate passes.
+# The container image on ghcr.io/nuvious/coqui-ai-api is the project's committed
+# primary distribution channel (see DESIGN.md, "Distribution"). This workflow
+# publishes it on push to main, gated on the verify workflow passing, and no
+# longer reads the deleted VERSION file.
+#
+# The old TTS==0.22.0-based image measured 16.9 GB, with a 2026-07-30 Trivy scan
+# finding 435 HIGH and 24 CRITICAL findings inherited from its base. That is a
+# pre-migration baseline, not a measurement of the slim-base image this workflow
+# builds today, which remains unmeasured; see DESIGN.md, "Known deviations".
 
 on:
   push:
