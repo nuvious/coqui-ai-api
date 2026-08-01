@@ -5,7 +5,7 @@ schema_version: '2'
 title: Retire the deviations this epic resolved
 epic: EP-01
 story: US-01-03
-status: blocked
+status: todo
 deps:
 - T-01-03-01
 scope:
