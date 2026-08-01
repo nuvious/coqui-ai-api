@@ -1,0 +1,53 @@
+name: Bug report
+description: Something in the API, the worker, or the container does not behave as documented.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The request or command, ideally as curl. Include the job id if one was returned.
+      render: bash
+    validations:
+      required: true
+
+  - type: dropdown
+    id: how-run
+    attributes:
+      label: How are you running it
+      options:
+        - Container from ghcr.io
+        - Container built from source
+        - Locally with uv
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The `version` from pyproject.toml, or the image tag.
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: workspace/config.yaml
+      description: Your config, with anything sensitive removed.
+      render: yaml
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant server output.
+      render: shell

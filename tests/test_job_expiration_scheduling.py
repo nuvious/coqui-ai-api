@@ -7,7 +7,12 @@ class TestScheduleExpirationSingleJob:
     def test_successful_process_task_sets_expires_at(self, app, client, output_dir):
         tts = MagicMock()
         app.register_job("j1", kind="single", word_count=3)
-        task = {"text": "hi there", "output_path": str(output_dir / "j1.wav"), "job_id": "j1", "word_count": 3}
+        task = {
+            "text": "hi there",
+            "output_path": str(output_dir / "j1.wav"),
+            "job_id": "j1",
+            "word_count": 3,
+        }
 
         resp_before = client.get("/job/j1/progress")
         assert resp_before.get_json()["expires_at"] is None
@@ -20,11 +25,18 @@ class TestScheduleExpirationSingleJob:
         resp_after = client.get("/job/j1/progress")
         assert resp_after.get_json()["expires_at"] is not None
 
-    def test_errored_process_task_also_schedules_expiration(self, app, client, output_dir):
+    def test_errored_process_task_also_schedules_expiration(
+        self, app, client, output_dir
+    ):
         tts = MagicMock()
         tts.tts_to_file.side_effect = RuntimeError("boom")
         app.register_job("j1", kind="single", word_count=3)
-        task = {"text": "hi there", "output_path": str(output_dir / "j1.wav"), "job_id": "j1", "word_count": 3}
+        task = {
+            "text": "hi there",
+            "output_path": str(output_dir / "j1.wav"),
+            "job_id": "j1",
+            "word_count": 3,
+        }
 
         app._process_task(tts, task)
 
@@ -32,11 +44,18 @@ class TestScheduleExpirationSingleJob:
         assert app.jobs["j1"]["expires_at"] is not None
         assert "j1" in app.expiration_timers
 
-    def test_expiration_disabled_leaves_expires_at_null(self, app, monkeypatch, output_dir):
+    def test_expiration_disabled_leaves_expires_at_null(
+        self, app, monkeypatch, output_dir
+    ):
         monkeypatch.setattr(app, "JOB_EXPIRATION_SECONDS", 0)
         tts = MagicMock()
         app.register_job("j1", kind="single", word_count=3)
-        task = {"text": "hi there", "output_path": str(output_dir / "j1.wav"), "job_id": "j1", "word_count": 3}
+        task = {
+            "text": "hi there",
+            "output_path": str(output_dir / "j1.wav"),
+            "job_id": "j1",
+            "word_count": 3,
+        }
 
         app._process_task(tts, task)
 
@@ -51,7 +70,10 @@ class TestScheduleExpirationLongFormParent:
         app.register_job("s1", kind="segment", word_count=2, parent_job_id=parent_id)
         with app.long_form_lock:
             app.long_form_jobs[parent_id] = {
-                "total": 1, "completed": 0, "status": "processing", "segments": ["s1"],
+                "total": 1,
+                "completed": 0,
+                "status": "processing",
+                "segments": ["s1"],
             }
         s1_wav = output_dir / "s1.wav"
         _write_minimal_wav(s1_wav)
@@ -66,7 +88,10 @@ class TestScheduleExpirationLongFormParent:
         app.register_job(parent_id, kind="long_form_parent", word_count=4)
         with app.long_form_lock:
             app.long_form_jobs[parent_id] = {
-                "total": 1, "completed": 0, "status": "processing", "segments": ["s1"],
+                "total": 1,
+                "completed": 0,
+                "status": "processing",
+                "segments": ["s1"],
             }
 
         app._handle_segment_complete(parent_id, success=False)
@@ -110,6 +135,7 @@ class TestExpirationTimerFires:
 
 def _write_minimal_wav(path):
     import wave
+
     with wave.open(str(path), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)

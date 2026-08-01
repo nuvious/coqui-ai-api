@@ -1,12 +1,24 @@
 name: Build and Push Docker Image
 
+# NOTE: image publication is under re-evaluation (see DESIGN.md, "Future work").
+# The base image is 16.9 GB, which is at or over the disk a standard GitHub-hosted
+# runner has free, and a 2026-07-30 Trivy scan of the shipped image found 435 HIGH
+# and 24 CRITICAL findings inherited from it. This workflow is left running as it
+# was, with two corrections: it no longer reads the deleted VERSION file, and it
+# cannot publish unless the gate passes.
+
 on:
   push:
     branches:
       - main
 
 jobs:
+  # The gate must pass before anything is published.
+  verify:
+    uses: ./.github/workflows/verify.yml
+
   build-and-push:
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -16,10 +28,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Read version from VERSION file
+      # pyproject.toml is the single source of truth for the version.
+      - name: Read version from pyproject.toml
         id: version
         run: |
-          VERSION=$(cat VERSION)
+          VERSION=$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)
+          if [ -z "$VERSION" ]; then
+            echo "could not read version from pyproject.toml" >&2
+            exit 1
+          fi
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Log in to GitHub Container Registry

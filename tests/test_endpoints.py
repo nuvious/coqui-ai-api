@@ -24,6 +24,7 @@ def _drain(queue):
 
 # --- POST /generate ---------------------------------------------------------
 
+
 class TestGenerate:
     def test_returns_201_and_enqueues(self, app, client, output_dir):
         resp = client.post("/generate", json={"text": "Hello there."})
@@ -70,6 +71,7 @@ class TestGenerate:
 
 # --- GET /job/<id> ----------------------------------------------------------
 
+
 class TestGetJob:
     def test_404_when_missing(self, client, output_dir):
         resp = client.get(f"/job/{uuid.uuid4()}")
@@ -84,6 +86,7 @@ class TestGetJob:
 
 
 # --- DELETE /job/<id> -------------------------------------------------------
+
 
 class TestDeleteJob:
     def test_204_when_present(self, client, output_dir):
@@ -104,7 +107,10 @@ class TestDeleteJob:
         _write_wav(output_dir / f"{job_id}.wav")
         with app.long_form_lock:
             app.long_form_jobs[job_id] = {
-                "total": 1, "completed": 1, "status": "done", "segments": [],
+                "total": 1,
+                "completed": 1,
+                "status": "done",
+                "segments": [],
             }
         resp = client.delete(f"/job/{job_id}")
         assert resp.status_code == 204
@@ -131,7 +137,10 @@ class TestDeleteJob:
         app.register_job(seg_id, kind="segment", word_count=4, parent_job_id=parent_id)
         with app.long_form_lock:
             app.long_form_jobs[parent_id] = {
-                "total": 1, "completed": 1, "status": "done", "segments": [seg_id],
+                "total": 1,
+                "completed": 1,
+                "status": "done",
+                "segments": [seg_id],
             }
 
         resp = client.delete(f"/job/{parent_id}")
@@ -143,6 +152,7 @@ class TestDeleteJob:
 
 
 # --- POST /generate/long-form -----------------------------------------------
+
 
 class TestGenerateLongForm:
     def test_201_enqueues_segments_and_tracks(self, app, client, output_dir):
@@ -159,7 +169,9 @@ class TestGenerateLongForm:
         assert len(tasks) == 3
         assert all(t["parent_job_id"] == job_id for t in tasks)
         assert [t["text"] for t in tasks] == [
-            "First sentence.", "Second sentence.", "Third sentence.",
+            "First sentence.",
+            "Second sentence.",
+            "Third sentence.",
         ]
 
         job = app.long_form_jobs[job_id]
@@ -196,12 +208,16 @@ class TestGenerateLongForm:
 
 # --- GET /job/<id>/progress -------------------------------------------------
 
+
 class TestProgress:
     def test_long_form_job(self, app, client, output_dir):
         job_id = str(uuid.uuid4())
         with app.long_form_lock:
             app.long_form_jobs[job_id] = {
-                "total": 5, "completed": 2, "status": "processing", "segments": [],
+                "total": 5,
+                "completed": 2,
+                "status": "processing",
+                "segments": [],
             }
         resp = client.get(f"/job/{job_id}/progress")
         body = resp.get_json()
@@ -231,6 +247,7 @@ class TestProgress:
 
 
 # --- GET /voices ------------------------------------------------------------
+
 
 def test_voices_lists_named_wavs(client, output_dir):
     _write_wav(output_dir / "rick.wav")

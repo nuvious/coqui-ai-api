@@ -15,8 +15,11 @@ def _write_wav(path):
 
 # --- _process_task feeds the estimator ---------------------------------------
 
+
 class TestProcessTaskRecordsDuration:
-    def test_success_records_word_count_and_duration(self, app, output_dir, monkeypatch):
+    def test_success_records_word_count_and_duration(
+        self, app, output_dir, monkeypatch
+    ):
         from unittest.mock import MagicMock
 
         clock = {"t": 0.0}
@@ -29,7 +32,12 @@ class TestProcessTaskRecordsDuration:
         tts.tts_to_file.side_effect = fake_generate
 
         app.register_job("j1", kind="single", word_count=10)
-        task = {"text": "x " * 10, "output_path": str(output_dir / "out.wav"), "job_id": "j1", "word_count": 10}
+        task = {
+            "text": "x " * 10,
+            "output_path": str(output_dir / "out.wav"),
+            "job_id": "j1",
+            "word_count": 10,
+        }
         app._process_task(tts, task)
 
         assert app.estimator.predict(10) == pytest.approx(4.0)
@@ -41,7 +49,12 @@ class TestProcessTaskRecordsDuration:
         tts.tts_to_file.side_effect = RuntimeError("boom")
 
         app.register_job("j1", kind="single", word_count=10)
-        task = {"text": "x " * 10, "output_path": str(output_dir / "out.wav"), "job_id": "j1", "word_count": 10}
+        task = {
+            "text": "x " * 10,
+            "output_path": str(output_dir / "out.wav"),
+            "job_id": "j1",
+            "word_count": 10,
+        }
         before = app.estimator.predict(10)
         app._process_task(tts, task)
 
@@ -50,8 +63,11 @@ class TestProcessTaskRecordsDuration:
 
 # --- Single job ETA ------------------------------------------------------
 
+
 class TestSingleJobETA:
-    def test_queued_behind_others_reports_position_and_positive_queue_seconds(self, app, client, output_dir):
+    def test_queued_behind_others_reports_position_and_positive_queue_seconds(
+        self, app, client, output_dir
+    ):
         app.mark_model_loaded()
         app.estimator.record(words=10, duration=5.0)
 
@@ -67,7 +83,9 @@ class TestSingleJobETA:
         assert body["position"] == 3
         assert body["queue_seconds"] > 0
 
-    def test_generation_seconds_matches_estimator_predict(self, app, client, output_dir):
+    def test_generation_seconds_matches_estimator_predict(
+        self, app, client, output_dir
+    ):
         app.mark_model_loaded()
         app.estimator.record(words=10, duration=5.0)
 
@@ -76,10 +94,13 @@ class TestSingleJobETA:
         resp = client.get("/job/j1/progress")
         body = resp.get_json()
 
-        assert body["generation_seconds"] == pytest.approx(round(app.estimator.predict(20), 1))
+        assert body["generation_seconds"] == pytest.approx(
+            round(app.estimator.predict(20), 1)
+        )
 
 
 # --- Long-form parent aggregation ------------------------------------------
+
 
 class TestLongFormAggregation:
     def test_generation_seconds_sums_pending_segments(self, app, client, output_dir):
@@ -89,7 +110,10 @@ class TestLongFormAggregation:
         parent_id = "p1"
         with app.long_form_lock:
             app.long_form_jobs[parent_id] = {
-                "total": 3, "completed": 1, "status": "processing", "segments": ["s1", "s2", "s3"],
+                "total": 3,
+                "completed": 1,
+                "status": "processing",
+                "segments": ["s1", "s2", "s3"],
             }
         app.register_job(parent_id, kind="long_form_parent", word_count=30)
         app.register_job("s1", kind="segment", word_count=10, parent_job_id=parent_id)
@@ -107,8 +131,11 @@ class TestLongFormAggregation:
 
 # --- Model-load time folded into queue_seconds -----------------------------
 
+
 class TestModelLoadFoldedIntoQueue:
-    def test_queue_seconds_includes_remaining_load_time(self, app, client, output_dir, monkeypatch):
+    def test_queue_seconds_includes_remaining_load_time(
+        self, app, client, output_dir, monkeypatch
+    ):
         clock = {"t": 1000.0}
         monkeypatch.setattr(app.time, "monotonic", lambda: clock["t"])
 
@@ -124,8 +151,11 @@ class TestModelLoadFoldedIntoQueue:
 
 # --- Completed jobs report zeros --------------------------------------------
 
+
 class TestCompletedJobReportsZeros:
-    def test_single_job_done_reports_zeros_and_terminal_status(self, app, client, output_dir):
+    def test_single_job_done_reports_zeros_and_terminal_status(
+        self, app, client, output_dir
+    ):
         app.register_job("j1", kind="single", word_count=5)
         app.mark_processing("j1")
         app.mark_done("j1")
@@ -144,7 +174,10 @@ class TestCompletedJobReportsZeros:
         parent_id = "p1"
         with app.long_form_lock:
             app.long_form_jobs[parent_id] = {
-                "total": 1, "completed": 1, "status": "done", "segments": ["s1"],
+                "total": 1,
+                "completed": 1,
+                "status": "done",
+                "segments": ["s1"],
             }
         app.register_job(parent_id, kind="long_form_parent", word_count=5)
         app.register_job("s1", kind="segment", word_count=5, parent_job_id=parent_id)

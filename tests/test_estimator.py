@@ -93,8 +93,7 @@ class TestThreadSafety:
                 est.record(words=word_base + i, duration=1.0)
 
         threads = [
-            threading.Thread(target=worker, args=(t * 1000,))
-            for t in range(n_threads)
+            threading.Thread(target=worker, args=(t * 1000,)) for t in range(n_threads)
         ]
         for t in threads:
             t.start()

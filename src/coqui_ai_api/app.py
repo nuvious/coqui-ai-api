@@ -13,12 +13,13 @@ from logging.config import dictConfig
 from typing import Annotated
 
 import yaml
-from flask import Response, jsonify, render_template, send_file
-from werkzeug.datastructures import FileStorage
+from flask import Response, jsonify, make_response, render_template, send_file
 from flask_cors import CORS
 from flask_openapi3 import Info, OpenAPI, Tag
 from pydantic import BaseModel, Field, WithJsonSchema
+from werkzeug.datastructures import FileStorage
 
+from coqui_ai_api import __version__
 from coqui_ai_api.estimator import RateEstimator
 
 # NOTE: ``torch`` and ``TTS`` are heavyweight (multi-GB) and are only needed by
@@ -108,15 +109,15 @@ def _count_words(text: str) -> int:
 
 
 def _split_sentences(text: str) -> list[str]:
-    text = text.replace('\r\n', '\n').replace('\r', '\n')
-    parts = re.split(r'(?<=[.!?])\s+|\n\n+', text.strip())
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    parts = re.split(r"(?<=[.!?])\s+|\n\n+", text.strip())
     return [s.strip() for s in parts if s.strip()]
 
 
 def _concatenate_wavs(input_paths: list[str], output_path: str):
-    with wave.open(output_path, 'wb') as outfile:
+    with wave.open(output_path, "wb") as outfile:
         for i, path in enumerate(input_paths):
-            with wave.open(path, 'rb') as infile:
+            with wave.open(path, "rb") as infile:
                 if i == 0:
                     outfile.setparams(infile.getparams())
                 outfile.writeframes(infile.readframes(infile.getnframes()))
@@ -136,32 +137,54 @@ def _list_speaker_wavs() -> list[str]:
 
 CONFIG = yaml.load(open(CONFIG_FILE, "r"), Loader=yaml.SafeLoader)
 
-info = Info(title="Coqui-AI API", version="0.1.0")
+info = Info(title="Coqui-AI API", version=__version__)
 app = OpenAPI(__name__, info=info)
 CORS(app, **CONFIG.get("cors", {}))
 
 
-JOB_GENERATION_TAG = Tag(name='Generation', description='Endpoints that create audio generation jobs.')
-JOB_FILE_OPERATIONS_TAG = Tag(name='Job File Ops', description='Job file operations.')
+JOB_GENERATION_TAG = Tag(
+    name="Generation", description="Endpoints that create audio generation jobs."
+)
+JOB_FILE_OPERATIONS_TAG = Tag(name="Job File Ops", description="Job file operations.")
+
 
 class JobGenerationModel(BaseModel):
     text: str
-    speaker_wav: str = Field(default="", description="Basename of a speaker wav in the workspace (e.g. 'rick.wav'). Defaults to the server's configured SPEAKER_WAV.")
+    speaker_wav: str = Field(
+        default="",
+        description=(
+            "Basename of a speaker wav in the workspace (e.g. 'rick.wav'). "
+            "Defaults to the server's configured SPEAKER_WAV."
+        ),
+    )
+
 
 # Annotated type that passes FileStorage through at runtime while emitting a
 # valid "binary" JSON Schema so flask-openapi3 can build the spec.
-_FileField = Annotated[FileStorage, WithJsonSchema({"type": "string", "format": "binary"})]
+_FileField = Annotated[
+    FileStorage, WithJsonSchema({"type": "string", "format": "binary"})
+]
+
 
 class LongFormGenerationForm(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
     file: _FileField = Field(description="Plain-text file to convert.")
-    speaker_wav: str = Field(default="", description="Basename of a speaker wav in the workspace. Defaults to the server's configured SPEAKER_WAV.")
+    speaker_wav: str = Field(
+        default="",
+        description=(
+            "Basename of a speaker wav in the workspace. "
+            "Defaults to the server's configured SPEAKER_WAV."
+        ),
+    )
+
 
 class JobModel(BaseModel):
     job_id: str
 
+
 class ErrorResponseModel(BaseModel):
     message: str
+
 
 # Flask logging config
 dictConfig(
@@ -184,7 +207,7 @@ dictConfig(
 )
 
 # Queues and long-form job tracking
-text_queue = queue.Queue()
+text_queue: "queue.Queue[dict | None]" = queue.Queue()
 long_form_jobs: dict = {}
 long_form_lock = threading.Lock()
 
@@ -194,8 +217,9 @@ long_form_lock = threading.Lock()
 # ``long_form_jobs`` above; must not change its existing behavior.
 #
 # Lock ordering: never hold more than one of ``jobs_lock``, ``long_form_lock``,
-# ``expiration_timers_lock``, ``worker_state_lock`` simultaneously. ``_schedule_expiration``
-# and ``_expire_job`` acquire ``jobs_lock`` and MUST be called with no other lock held.
+# ``expiration_timers_lock``, ``worker_state_lock`` simultaneously.
+# ``_schedule_expiration`` and ``_expire_job`` acquire ``jobs_lock`` and MUST be
+# called with no other lock held.
 jobs: "OrderedDict[str, dict]" = OrderedDict()
 jobs_lock = threading.Lock()
 _job_seq_counter = itertools.count()
@@ -212,7 +236,9 @@ expiration_timers: dict[str, threading.Timer] = {}
 expiration_timers_lock = threading.Lock()
 
 
-def register_job(job_id: str, kind: str, word_count: int, parent_job_id: str | None = None) -> None:
+def register_job(
+    job_id: str, kind: str, word_count: int, parent_job_id: str | None = None
+) -> None:
     """Register a new job (or segment) as ``queued`` in the job registry."""
     with jobs_lock:
         jobs[job_id] = {
@@ -294,8 +320,10 @@ def position(job_id: str) -> int | None:
 
         if job["kind"] == "long_form_parent":
             segments = [
-                j for j in jobs.values()
-                if j["parent_job_id"] == job_id and j["status"] in ("queued", "processing")
+                j
+                for j in jobs.values()
+                if j["parent_job_id"] == job_id
+                and j["status"] in ("queued", "processing")
             ]
             if not segments:
                 return 0
@@ -307,8 +335,10 @@ def position(job_id: str) -> int | None:
         # Parent entries are bookkeeping only; the worker never dequeues them
         # directly (only their segments), so they don't occupy a queue slot.
         pending = [
-            j for j in jobs.values()
-            if j["kind"] != "long_form_parent" and j["status"] in ("queued", "processing")
+            j
+            for j in jobs.values()
+            if j["kind"] != "long_form_parent"
+            and j["status"] in ("queued", "processing")
         ]
         pending.sort(key=lambda j: j["seq"])
         return pending.index(job) + 1
@@ -327,8 +357,10 @@ def _job_generation_seconds(job_id: str) -> float:
             return 0.0
         if job["kind"] == "long_form_parent":
             words = [
-                j["word_count"] for j in jobs.values()
-                if j["parent_job_id"] == job_id and j["status"] in ("queued", "processing")
+                j["word_count"]
+                for j in jobs.values()
+                if j["parent_job_id"] == job_id
+                and j["status"] in ("queued", "processing")
             ]
         elif job["status"] in ("queued", "processing"):
             words = [job["word_count"]]
@@ -351,8 +383,10 @@ def _job_queue_seconds(job_id: str) -> float:
 
         if job["kind"] == "long_form_parent":
             pending = [
-                j for j in jobs.values()
-                if j["parent_job_id"] == job_id and j["status"] in ("queued", "processing")
+                j
+                for j in jobs.values()
+                if j["parent_job_id"] == job_id
+                and j["status"] in ("queued", "processing")
             ]
             if not pending:
                 return 0.0
@@ -364,7 +398,8 @@ def _job_queue_seconds(job_id: str) -> float:
             return 0.0
 
         ahead = [
-            j for j in jobs.values()
+            j
+            for j in jobs.values()
             if j["kind"] != "long_form_parent"
             and j["status"] in ("queued", "processing")
             and j["seq"] < target["seq"]
@@ -393,7 +428,8 @@ def _job_expires_at(job_id: str) -> str | None:
 
 
 def _progress_eta_fields(job_id: str) -> dict:
-    """The ``position``/``*_seconds``/``expires_at`` fields shared by every /progress branch."""
+    """The ``position``/``*_seconds``/``expires_at`` fields shared by every
+    /progress branch."""
     generation_seconds = _job_generation_seconds(job_id)
     queue_seconds = _job_queue_seconds(job_id)
     return {
@@ -500,8 +536,7 @@ def _expire_job(job_id: str) -> None:
 
         if job["kind"] == "long_form_parent":
             segment_ids = [
-                j["job_id"] for j in list(jobs.values())
-                if j["parent_job_id"] == job_id
+                j["job_id"] for j in list(jobs.values()) if j["parent_job_id"] == job_id
             ]
             for seg_id in segment_ids:
                 jobs.pop(seg_id, None)
@@ -638,15 +673,26 @@ class ReadinessModel(BaseModel):
     queue_depth: int
 
 
-@app.get("/health", summary="Liveness check.", tags=[HEALTH_TAG], responses={200: HealthModel})
+@app.get(
+    "/health",
+    summary="Liveness check.",
+    tags=[HEALTH_TAG],
+    responses={200: HealthModel},
+)
 def get_health() -> Response:
     """Always returns 200 as long as the process is serving requests."""
     return jsonify({"status": "ok"})
 
 
-@app.get("/ready", summary="Readiness check.", tags=[HEALTH_TAG], responses={200: ReadinessModel, 503: ReadinessModel})
+@app.get(
+    "/ready",
+    summary="Readiness check.",
+    tags=[HEALTH_TAG],
+    responses={200: ReadinessModel, 503: ReadinessModel},
+)
 def get_ready() -> Response:
-    """Returns 200 once the model is loaded and the worker thread is alive, 503 otherwise."""
+    """Returns 200 once the model is loaded and the worker thread is alive,
+    503 otherwise."""
     worker_alive = is_worker_alive()
     body = {
         "model": "loaded" if model_loaded.is_set() else "loading",
@@ -654,13 +700,15 @@ def get_ready() -> Response:
         "queue_depth": text_queue.qsize(),
     }
     status_code = 200 if model_loaded.is_set() and worker_alive else 503
-    return jsonify(body), status_code
+    return make_response(jsonify(body), status_code)
 
 
-@app.post("/generate", summary="Generate audio job creation.", tags=[JOB_GENERATION_TAG], responses={
-    201: JobModel,
-    400: ErrorResponseModel
-})
+@app.post(
+    "/generate",
+    summary="Generate audio job creation.",
+    tags=[JOB_GENERATION_TAG],
+    responses={201: JobModel, 400: ErrorResponseModel},
+)
 def post_generate(body: JobGenerationModel) -> Response:
     """
     Generates an audio file from provided text.
@@ -668,7 +716,7 @@ def post_generate(body: JobGenerationModel) -> Response:
     app.logger.info(f"Text: {body.text}")
 
     if not body.text:
-        return jsonify({"message": "Missing or empty text."}), 400
+        return make_response(jsonify({"message": "Missing or empty text."}), 400)
 
     # Generate a job id and output path
     job_id = str(uuid.uuid4())
@@ -695,13 +743,15 @@ def post_generate(body: JobGenerationModel) -> Response:
     )
 
     # Return 201
-    return jsonify({"job_id": str(job_id)}), 201
+    return make_response(jsonify({"job_id": str(job_id)}), 201)
 
 
-@app.get("/job/<string:job_id>", summary="Get generated wav file.", tags=[JOB_FILE_OPERATIONS_TAG], responses={
-    200: {"content": {"audio/wav": {}}},
-    404: ErrorResponseModel
-})
+@app.get(
+    "/job/<string:job_id>",
+    summary="Get generated wav file.",
+    tags=[JOB_FILE_OPERATIONS_TAG],
+    responses={200: {"content": {"audio/wav": {}}}, 404: ErrorResponseModel},
+)
 def get_job(path: JobModel) -> Response:
     """
     Gets a generated audio file given a job id.
@@ -709,16 +759,19 @@ def get_job(path: JobModel) -> Response:
     wav_file = _get_filename(path.job_id)
 
     if not os.path.isfile(wav_file):
-        return jsonify({"error": "File still processing or does not exist."}), 404
+        return make_response(
+            jsonify({"error": "File still processing or does not exist."}), 404
+        )
 
     return send_file(wav_file, as_attachment=True)
 
 
-@app.delete("/job/<string:job_id>", summary="Delete job file.", tags=[JOB_FILE_OPERATIONS_TAG],
-            responses={
-                204: None,
-                404: ErrorResponseModel
-            })
+@app.delete(
+    "/job/<string:job_id>",
+    summary="Delete job file.",
+    tags=[JOB_FILE_OPERATIONS_TAG],
+    responses={204: None, 404: ErrorResponseModel},
+)
 def delete_job(path: JobModel) -> Response:
     """
     Deletes a generated audio file given a job id, and purges any registry,
@@ -735,7 +788,7 @@ def delete_job(path: JobModel) -> Response:
     has_wav = os.path.isfile(wav_file)
 
     if not has_registry_entry and not has_long_form_entry and not has_wav:
-        return jsonify({"message": "File not found."}), 404
+        return make_response(jsonify({"message": "File not found."}), 404)
 
     _expire_job(job_id)
     try:
@@ -748,16 +801,22 @@ def delete_job(path: JobModel) -> Response:
     return Response(None, 204)
 
 
-@app.post("/generate/long-form", summary="Enqueue a long-form TTS job.", tags=[JOB_GENERATION_TAG], responses={
-    201: JobModel,
-    400: ErrorResponseModel
-})
+@app.post(
+    "/generate/long-form",
+    summary="Enqueue a long-form TTS job.",
+    tags=[JOB_GENERATION_TAG],
+    responses={201: JobModel, 400: ErrorResponseModel},
+)
 def post_generate_long_form(form: LongFormGenerationForm) -> Response:
-    """Enqueue a long-form TTS job from an uploaded plain-text file. The file is split into sentences and each is synthesised in order; results are concatenated into a single WAV."""
+    """Enqueue a long-form TTS job from an uploaded plain-text file.
+
+    The file is split into sentences and each is synthesised in order; results
+    are concatenated into a single WAV.
+    """
     text = form.file.read().decode("utf-8")
     sentences = _split_sentences(text)
     if not sentences:
-        return jsonify({"message": "No sentences found in file."}), 400
+        return make_response(jsonify({"message": "No sentences found in file."}), 400)
 
     speaker_wav = None
     if form.speaker_wav:
@@ -767,21 +826,27 @@ def post_generate_long_form(form: LongFormGenerationForm) -> Response:
 
     parent_job_id = str(uuid.uuid4())
     segment_word_counts = [_count_words(sentence) for sentence in sentences]
-    register_job(parent_job_id, kind="long_form_parent", word_count=sum(segment_word_counts))
+    register_job(
+        parent_job_id, kind="long_form_parent", word_count=sum(segment_word_counts)
+    )
 
     segment_ids = []
     for sentence, word_count in zip(sentences, segment_word_counts):
         seg_id = str(uuid.uuid4())
         segment_ids.append(seg_id)
-        register_job(seg_id, kind="segment", word_count=word_count, parent_job_id=parent_job_id)
-        text_queue.put({
-            "text": sentence,
-            "output_path": _get_filename(seg_id),
-            "job_id": seg_id,
-            "speaker_wav": speaker_wav,
-            "parent_job_id": parent_job_id,
-            "word_count": word_count,
-        })
+        register_job(
+            seg_id, kind="segment", word_count=word_count, parent_job_id=parent_job_id
+        )
+        text_queue.put(
+            {
+                "text": sentence,
+                "output_path": _get_filename(seg_id),
+                "job_id": seg_id,
+                "speaker_wav": speaker_wav,
+                "parent_job_id": parent_job_id,
+                "word_count": word_count,
+            }
+        )
 
     with long_form_lock:
         long_form_jobs[parent_job_id] = {
@@ -791,36 +856,59 @@ def post_generate_long_form(form: LongFormGenerationForm) -> Response:
             "segments": segment_ids,
         }
 
-    return jsonify({"job_id": parent_job_id}), 201
+    return make_response(jsonify({"job_id": parent_job_id}), 201)
 
 
-@app.get("/job/<string:job_id>/progress", summary="Get long-form job progress.", tags=[JOB_FILE_OPERATIONS_TAG], responses={200: {}})
+@app.get(
+    "/job/<string:job_id>/progress",
+    summary="Get long-form job progress.",
+    tags=[JOB_FILE_OPERATIONS_TAG],
+    responses={200: {}},
+)
 def get_job_progress(path: JobModel) -> Response:
-    """Returns progress for a long-form job, or simple done/pending status for a single job."""
+    """Returns progress for a long-form job, or simple done/pending status for
+    a single job."""
     with long_form_lock:
         job_info = long_form_jobs.get(path.job_id)
         if job_info:
-            return jsonify({
-                "job_id": path.job_id,
-                "total": job_info["total"],
-                "completed": job_info["completed"],
-                "status": job_info["status"],
-                **_progress_eta_fields(path.job_id),
-            })
+            return jsonify(
+                {
+                    "job_id": path.job_id,
+                    "total": job_info["total"],
+                    "completed": job_info["completed"],
+                    "status": job_info["status"],
+                    **_progress_eta_fields(path.job_id),
+                }
+            )
 
     wav_file = _get_filename(path.job_id)
     if os.path.isfile(wav_file):
-        return jsonify({
-            "job_id": path.job_id, "total": 1, "completed": 1, "status": "done",
+        return jsonify(
+            {
+                "job_id": path.job_id,
+                "total": 1,
+                "completed": 1,
+                "status": "done",
+                **_progress_eta_fields(path.job_id),
+            }
+        )
+    return jsonify(
+        {
+            "job_id": path.job_id,
+            "total": 1,
+            "completed": 0,
+            "status": "processing",
             **_progress_eta_fields(path.job_id),
-        })
-    return jsonify({
-        "job_id": path.job_id, "total": 1, "completed": 0, "status": "processing",
-        **_progress_eta_fields(path.job_id),
-    })
+        }
+    )
 
 
-@app.get("/voices", summary="List available speaker wav files.", tags=[JOB_GENERATION_TAG], responses={200: {}})
+@app.get(
+    "/voices",
+    summary="List available speaker wav files.",
+    tags=[JOB_GENERATION_TAG],
+    responses={200: {}},
+)
 def get_voices() -> Response:
     """
     Returns a list of available speaker wav filenames from the workspace.

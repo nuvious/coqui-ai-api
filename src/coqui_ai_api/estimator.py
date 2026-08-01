@@ -20,7 +20,9 @@ class RateEstimator:
     maintained incrementally in O(1) per ``record`` call.
     """
 
-    def __init__(self, seed_overhead: float = SEED_OVERHEAD, seed_per_word: float = SEED_PER_WORD):
+    def __init__(
+        self, seed_overhead: float = SEED_OVERHEAD, seed_per_word: float = SEED_PER_WORD
+    ):
         self._seed_overhead = seed_overhead
         self._seed_per_word = seed_per_word
         self._lock = threading.Lock()

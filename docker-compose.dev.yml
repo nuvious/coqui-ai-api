@@ -1,0 +1,28 @@
+# Development container. Separate from docker-compose.yaml, which runs the real
+# GPU service; this one exists to run `make verify` and to give autonomous agent
+# runs a container to be contained by.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml exec dev make verify
+#
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    # The repository is the only thing mounted. Nothing here reaches the host
+    # home directory, an SSH agent, or the Docker socket, which is what makes it
+    # safe to run agents with permission checks skipped inside it.
+    volumes:
+      - .:/workspace:cached
+      # Named volume so the container's venv is not clobbered by, and does not
+      # clobber, a .venv built on the host.
+      - dev-venv:/opt/venv
+    working_dir: /workspace
+    # No ports published: the test suite never binds one. Add a mapping here
+    # deliberately if you want to run the app inside this container.
+    command: sleep infinity
+    init: true
+
+volumes:
+  dev-venv:

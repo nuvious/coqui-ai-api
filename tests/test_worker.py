@@ -14,6 +14,7 @@ def _write_wav(path, frames=b"\x01\x00" * 40):
 
 # --- _process_task ----------------------------------------------------------
 
+
 class TestProcessTask:
     def test_calls_tts_with_expected_args(self, app, output_dir):
         app.register_job("j1", kind="single", word_count=1)
@@ -47,11 +48,17 @@ class TestProcessTask:
         app.register_job("s1", kind="segment", word_count=1, parent_job_id="p1")
         calls = []
         monkeypatch.setattr(
-            app, "_handle_segment_complete",
+            app,
+            "_handle_segment_complete",
             lambda pid, success: calls.append((pid, success)),
         )
         tts = MagicMock()
-        task = {"text": "Hi", "output_path": str(output_dir / "x.wav"), "job_id": "s1", "parent_job_id": "p1"}
+        task = {
+            "text": "Hi",
+            "output_path": str(output_dir / "x.wav"),
+            "job_id": "s1",
+            "parent_job_id": "p1",
+        }
 
         app._process_task(tts, task)
         assert calls == [("p1", True)]
@@ -60,12 +67,18 @@ class TestProcessTask:
         app.register_job("s1", kind="segment", word_count=1, parent_job_id="p1")
         calls = []
         monkeypatch.setattr(
-            app, "_handle_segment_complete",
+            app,
+            "_handle_segment_complete",
             lambda pid, success: calls.append((pid, success)),
         )
         tts = MagicMock()
         tts.tts_to_file.side_effect = RuntimeError("boom")
-        task = {"text": "Hi", "output_path": str(output_dir / "x.wav"), "job_id": "s1", "parent_job_id": "p1"}
+        task = {
+            "text": "Hi",
+            "output_path": str(output_dir / "x.wav"),
+            "job_id": "s1",
+            "parent_job_id": "p1",
+        }
 
         app._process_task(tts, task)  # must not raise
         assert calls == [("p1", False)]
@@ -74,7 +87,8 @@ class TestProcessTask:
         app.register_job("s1", kind="single", word_count=1)
         calls = []
         monkeypatch.setattr(
-            app, "_handle_segment_complete",
+            app,
+            "_handle_segment_complete",
             lambda pid, success: calls.append((pid, success)),
         )
         tts = MagicMock()
@@ -97,7 +111,7 @@ class TestProcessTask:
         assert "j1" not in app.expiration_timers
 
     def test_discards_output_for_job_deleted_mid_synthesis(self, app, output_dir):
-        """A job deleted while the model is running must not leave a WAV or bookkeeping."""
+        """A job deleted mid-synthesis leaves no WAV and no bookkeeping."""
         app.register_job("j1", kind="single", word_count=1)
         out = output_dir / "j1.wav"
 
@@ -118,6 +132,7 @@ class TestProcessTask:
 
 
 # --- _handle_segment_complete ----------------------------------------------
+
 
 class TestHandleSegmentComplete:
     def _register(self, app, parent_id, segment_ids):
@@ -169,7 +184,9 @@ class TestHandleSegmentComplete:
         for sid in seg_ids:
             assert not (output_dir / f"{sid}.wav").exists()
 
-    def test_concatenate_failure_sets_error_and_cleans_up(self, app, output_dir, monkeypatch):
+    def test_concatenate_failure_sets_error_and_cleans_up(
+        self, app, output_dir, monkeypatch
+    ):
         seg_ids = ["s1", "s2"]
         for sid in seg_ids:
             _write_wav(output_dir / f"{sid}.wav")

@@ -19,7 +19,9 @@ class TestExpireJob:
         app.register_job("s2", kind="segment", word_count=2, parent_job_id=parent_id)
         with app.long_form_lock:
             app.long_form_jobs[parent_id] = {
-                "total": 2, "completed": 2, "status": "done",
+                "total": 2,
+                "completed": 2,
+                "status": "done",
                 "segments": ["s1", "s2"],
             }
 

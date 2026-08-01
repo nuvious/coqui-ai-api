@@ -1,7 +1,7 @@
 """Tests for the unified job registry and queue position (task 03)."""
 
-
 # --- _count_words ------------------------------------------------------------
+
 
 class TestCountWords:
     def test_counts_whitespace_separated_words(self, app):
@@ -15,6 +15,7 @@ class TestCountWords:
 
 
 # --- register_job / status transitions ---------------------------------------
+
 
 class TestRegisterJobAndTransitions:
     def test_register_creates_queued_entry(self, app):
@@ -50,6 +51,7 @@ class TestRegisterJobAndTransitions:
 
 
 # --- position ------------------------------------------------------------
+
 
 class TestPosition:
     def test_unknown_job_returns_none(self, app):
@@ -124,6 +126,7 @@ class TestPosition:
 
 # --- Wiring: POST /generate registers a job ----------------------------------
 
+
 class TestGenerateRegistersJob:
     def test_registers_single_job_with_word_count(self, app, client, output_dir):
         resp = client.post("/generate", json={"text": "Hello there world"})
@@ -150,23 +153,32 @@ class TestLongFormRegistersJobs:
         parent = app.jobs[parent_id]
         assert parent["kind"] == "long_form_parent"
         assert parent["word_count"] == sum(
-            app._count_words(s) for s in ["First sentence.", "Second one here.", "Third."]
+            app._count_words(s)
+            for s in ["First sentence.", "Second one here.", "Third."]
         )
 
         segment_jobs = [j for j in app.jobs.values() if j["parent_job_id"] == parent_id]
         assert len(segment_jobs) == 3
-        assert all(j["kind"] == "segment" and j["status"] == "queued" for j in segment_jobs)
+        assert all(
+            j["kind"] == "segment" and j["status"] == "queued" for j in segment_jobs
+        )
         assert app.position(parent_id) == 1
 
 
 # --- Wiring: _process_task transitions -------------------------------------
+
 
 class TestProcessTaskTransitions:
     def test_success_marks_done(self, app, output_dir):
         from unittest.mock import MagicMock
 
         app.register_job("j1", kind="single", word_count=2)
-        task = {"text": "Hi there", "output_path": str(output_dir / "out.wav"), "job_id": "j1", "word_count": 2}
+        task = {
+            "text": "Hi there",
+            "output_path": str(output_dir / "out.wav"),
+            "job_id": "j1",
+            "word_count": 2,
+        }
         app._process_task(MagicMock(), task)
 
         assert app.jobs["j1"]["status"] == "done"
@@ -178,7 +190,12 @@ class TestProcessTaskTransitions:
         app.register_job("j1", kind="single", word_count=2)
         tts = MagicMock()
         tts.tts_to_file.side_effect = RuntimeError("boom")
-        task = {"text": "Hi there", "output_path": str(output_dir / "out.wav"), "job_id": "j1", "word_count": 2}
+        task = {
+            "text": "Hi there",
+            "output_path": str(output_dir / "out.wav"),
+            "job_id": "j1",
+            "word_count": 2,
+        }
         app._process_task(tts, task)
 
         assert app.jobs["j1"]["status"] == "error"

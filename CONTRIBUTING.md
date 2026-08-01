@@ -4,18 +4,30 @@ Thanks for your interest in improving **coqui-ai-api** — a REST API wrapper ar
 the [Coqui-AI TTS](https://github.com/coqui-ai/TTS) engine (XTTS v2) with voice
 cloning, an async job queue, and a minimal web UI.
 
+> [!WARNING]
+> Pending confirmation. Sections covering the gate, releases, the development
+> container, and code style were drafted on 2026-07-30 and have not yet been
+> reviewed by the user.
+
 This document is the single source of truth for how to develop, test, and ship
 changes. It is written for humans first; an [automated-agent section](#for-ai-agents)
 follows at the end.
+
+What the project is meant to be, and what has been deliberately decided about it,
+lives in [DESIGN.md](DESIGN.md). Read that before proposing a change to the shape
+of the service.
 
 ## Getting started
 
 ### Prerequisites
 
-- **Python `>=3.9,<3.12`.** The upper bound is enforced by `TTS==0.22.0` at build
-  time, so a 3.12+ interpreter will not be able to install the project.
+- **Python `>=3.10,<3.12`.** The upper bound is enforced by `TTS==0.22.0` at build
+  time, so a 3.12+ interpreter will not be able to install the project. The lower
+  bound is real too: the code uses PEP 604 unions (`float | None`) in
+  runtime-evaluated annotations, which 3.9 cannot execute.
 - **[uv](https://docs.astral.sh/uv/)** for dependency and environment management
   (`pyproject.toml` + `uv.lock`).
+- **make**, which is how the gate is run.
 - For actually generating audio: an NVIDIA GPU + drivers are recommended (CPU works
   but is slow), and the XTTS v2 model weights (downloaded automatically on first run).
 
@@ -23,12 +35,14 @@ follows at the end.
 
 ```bash
 # Install all runtime + dev dependencies into a local .venv
-uv sync --dev
+make install
 
 # One-time: create a workspace config
 mkdir -p workspace
 cp config.yaml.example workspace/config.yaml
 ```
+
+Run `make help` to see every available target.
 
 ### Run the app locally
 
@@ -53,27 +67,89 @@ docker compose up --build
 `docker-compose.yaml` mounts `workspace/` and `models/`, exposes port 5000, and
 enables all NVIDIA GPUs via the `deploy.resources.reservations` block. The
 Dockerfile uses plain `pip3 install .` (not uv) so the container has no uv
-dependency.
+dependency, which also means the image does not install from `uv.lock`. That is a
+known deviation with measurements recorded in [DESIGN.md](DESIGN.md); do not
+"fix" it without reading them.
+
+### Work in the development container
+
+Optional for humans, and the intended sandbox for autonomous agent runs. It
+mounts this repository and nothing else: no host home directory, no SSH agent,
+no Docker socket.
+
+```bash
+make dev-up       # build, start, install dependencies
+make dev-verify   # run the gate inside the container
+make dev-down
+```
+
+It is a CPU-only ~390 MB image built from `python:3.11-slim`, deliberately not
+from the 16.9 GB Coqui base: the suite mocks the TTS engine, so the gate needs
+no GPU, no CUDA, and no model weights.
+
+## The gate
+
+One command checks the whole repository:
+
+```bash
+make verify
+```
+
+It runs, cheapest first, and fails on the first problem:
+
+| Step | Command | What it enforces |
+|---|---|---|
+| Format | `isort --check-only`, `black --check` | Import order and formatting |
+| Lint | `flake8` | pycodestyle/pyflakes plus mccabe complexity `<= 10` |
+| Types | `mypy` | Strict by default; see below |
+| Tests | `pytest --cov` | The suite and the coverage threshold |
+| Audit | `pip-audit` | Known vulnerabilities in installed dependencies |
+
+**CI runs exactly this command** (`.github/workflows/verify.yml`) on every push to
+`main` and `dev` and on every pull request, and the image is not published unless
+it passes. Add a check by adding it to the Makefile, never to the workflow, so the
+two cannot drift.
+
+`make verify` never rewrites files. Use `make format` for that.
+
+Two things are deliberately outside the gate:
+
+- **SonarQube** runs server-side (`.github/workflows/sonar-build.yml`) so that
+  `make verify` keeps working with no network. Its quality gate fails the run on
+  push; pull requests get decoration only, per SonarSource's guidance.
+- **`make smoke`** builds the runtime image and checks it serves `/health` and the
+  OpenAPI spec. It is not in CI because the 16.9 GB base image is at or over the
+  free disk a standard GitHub-hosted runner has. Run it locally after changing the
+  `Dockerfile` or the entrypoint.
 
 ## Testing
 
-Tests use **pytest** and never load the real TTS model — the heavy `torch`/`TTS`
+Tests use **pytest** and never load the real TTS model. The heavy `torch`/`TTS`
 imports are deferred to the worker thread, and the test suite disables the worker
 and injects a mock model. As a result the suite runs in well under a second and
 needs no GPU or model weights.
 
 ```bash
-# Run the full suite with coverage gate
-uv run pytest --cov
+make test      # just the suite
+make verify    # the suite plus everything else
 ```
 
 ### Coverage requirements
 
-- **Overall: ≥80%** — configured as `fail_under` in `pyproject.toml`; the
-  `uv run pytest --cov` run fails if total coverage drops below it.
+- **Overall: ≥95%**, configured as `fail_under` in `pyproject.toml`. Actual
+  coverage is currently 98.45%, so the threshold has headroom for an honest
+  refactor without tolerating a real regression.
 
-This gate runs in CI (`.github/workflows/tests.yml`) on every push to `main` and
-every pull request. New code should ship with tests that keep it green.
+### Type checking
+
+mypy runs in **strict** mode by default. Modules that predate the gate carry
+named relaxations in `[[tool.mypy.overrides]]` in `pyproject.toml`, and the list
+is meant to shrink: drop an entry once its module is annotated. Anything **new**
+gets no entry and is strict from the start.
+
+Third-party packages without type information (`TTS`, `torch`, `flask_cors`,
+`flask_openapi3`) are listed there too. Add to that list only for a package that
+genuinely ships no stubs, never to silence an error in this project's own code.
 
 ### How the test suite is wired
 
@@ -87,19 +163,63 @@ every pull request. New code should ship with tests that keep it green.
 
 ## Code style & conventions
 
-- Match the style of the surrounding code; keep the package importable without the
-  heavy ML stack (don't add module-level `import torch` / `from TTS...`).
-- Avoid adding import-time side effects. Anything that loads a model or starts a
+Formatting and import order are not a matter of taste here: `make verify` decides
+them, and `make format` fixes them.
+
+| Concern | Tool | Configured in |
+|---|---|---|
+| Formatting | Black, line length 88 | `[tool.black]` in `pyproject.toml` |
+| Import order | isort, `black` profile | `[tool.isort]` in `pyproject.toml` |
+| Lint and complexity | flake8 + mccabe, `max-complexity = 10` | `.flake8` (flake8 cannot read `pyproject.toml`) |
+| Types | mypy, strict | `[tool.mypy]` in `pyproject.toml` |
+
+The conventions the tools cannot check, and which matter more:
+
+- **Keep the package importable without the heavy ML stack.** No module-level
+  `import torch` or `from TTS...`. This is what makes the test suite possible.
+- **Avoid import-time side effects.** Anything that loads a model or starts a
   thread must be guarded so tests can import the module cheaply.
-- Keep endpoint response shapes stable — they are part of the public API.
+- **Never hold two of the four module locks at once** (`jobs_lock`,
+  `long_form_lock`, `expiration_timers_lock`, `worker_state_lock`).
+  `tests/test_lock_ordering.py` exists because this was violated once already.
+- **Keep endpoint response shapes stable.** They are a public contract, not an
+  implementation detail.
+- **The version lives in `pyproject.toml` and nowhere else.** Read it from
+  `coqui_ai_api.__version__`, which comes from installed package metadata.
+  `tests/test_version.py` enforces this.
+
+## Releases
+
+The project uses [semantic versioning](https://semver.org/spec/v2.0.0.html), and
+is distributed as GitHub release artifacts. To cut a release:
+
+1. Make sure `make verify` passes on the branch to be released.
+2. Bump `version` in `pyproject.toml`. **This is the only place the version
+   lives**; the package, the OpenAPI spec, and the image tag all derive from it.
+3. Move the entries under `## [Unreleased]` in `CHANGELOG.md` into a new
+   `## [X.Y.Z] - YYYY-MM-DD` section, and update the comparison links at the
+   bottom of the file. Entries are human-written summaries, not pasted commit
+   subjects.
+4. Commit, tag `X.Y.Z`, and push the tag.
+5. Build the artifacts (`uv build`) and attach the wheel and sdist to the GitHub
+   release.
+
+> [!NOTE]
+> `0.1.1` has been the in-development version in the manifest since 2025-08-25
+> but was never tagged. The last actual release is `0.1.0`.
+
+Container image publication to `ghcr.io` currently happens automatically on push
+to `main`, but is under re-evaluation rather than being the committed distribution
+model. See [DESIGN.md](DESIGN.md).
 
 ## Submitting changes
 
 1. Branch off `main`.
 2. Make your change with accompanying tests.
-3. Ensure `uv run pytest --cov` passes (it enforces the ≥80% coverage gate).
-4. Update documentation (see the rule below).
-5. Open a pull request describing the change and its rationale.
+3. Ensure `make verify` passes.
+4. Add an entry under `## [Unreleased]` in `CHANGELOG.md`.
+5. Update documentation (see the rule below).
+6. Open a pull request describing the change and its rationale.
 
 ---
 
@@ -112,12 +232,26 @@ every pull request. New code should ship with tests that keep it green.
 
 Additional house rules for automated contributors:
 
-- Run the full test suite with coverage (`uv run pytest --cov`) before declaring a
-  task done. Do not lower the coverage threshold to make a change pass.
+- **Run `make verify` before declaring a task done.** It is the gate: your claim
+  that the work is correct is a claim, its exit code is the evidence. Do not
+  lower the coverage threshold, add a mypy override for this project's own code,
+  or widen a flake8 ignore to make a change pass.
+- **Do not run git.** Branches, commits, and history are the maintainer's, not
+  yours.
 - Preserve existing endpoint behavior and response shapes unless explicitly asked to
   change them; treat them as a public contract.
 - Prefer behavior-preserving refactors. When code must change to be testable, gate
   side effects behind flags/functions rather than deleting functionality.
+- **If the specification does not answer your question, stop and say so.** Read
+  [DESIGN.md](DESIGN.md), including its open questions and known deviations,
+  before assuming something is a bug. Inventing a plausible answer and building on
+  it is worse than halting: the resolution to a genuine gap is an edit to these
+  documents, so a question answered only in chat will be asked again next session.
+- You have no network access. That is how the run loop is meant to work, not a
+  gap in the specification: follow the standards already recorded here and in
+  DESIGN.md rather than escalating because you cannot check a source. Note that
+  it does mean you cannot read the GitHub issue tracker, which is this project's
+  known-issues record.
 
 ### Architecture
 
@@ -125,8 +259,8 @@ The package uses a `src/` layout. Build backend is `hatchling`.
 
 ```
 src/coqui_ai_api/
-    __init__.py          # empty
-    app.py               # entire Flask app — routes, worker, helpers, models
+    __init__.py          # exports __version__, read from package metadata
+    app.py               # entire Flask app: routes, worker, helpers, models
     estimator.py         # RateEstimator: learns generation time from completed jobs
     templates/
         index.html       # single-page UI (dark theme, polls progress)

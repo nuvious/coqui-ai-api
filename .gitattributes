@@ -1,0 +1,12 @@
+# Normalize line endings in the repository to LF.
+#
+# Without this, editing on Windows and on WSL produced whole-file CRLF/LF diffs:
+# `git status` reported every line of app.py, pyproject.toml and CLAUDE.md as
+# changed while `git diff -w` was empty.
+* text=auto eol=lf
+
+# Binary, never touched.
+*.wav binary
+*.png binary
+*.jpg binary
+*.pth binary
