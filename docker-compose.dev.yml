@@ -5,19 +5,53 @@
 #   docker compose -f docker-compose.dev.yml up -d
 #   docker compose -f docker-compose.dev.yml exec dev make verify
 #
+# Build it as yourself, so that files the container writes into the repository
+# and the mounted credentials below are owned by you rather than by root:
+#
+#   USER_UID=$(id -u) USER_GID=$(id -g) \
+#       docker compose -f docker-compose.dev.yml up -d --build
+#
 services:
   dev:
     build:
       context: .
-      dockerfile: .devcontainer/Dockerfile
-    # The repository is the only thing mounted. Nothing here reaches the host
-    # home directory, an SSH agent, or the Docker socket, which is what makes it
-    # safe to run agents with permission checks skipped inside it.
+      dockerfile: .devcontainer/Dockerfile.claude
+      args:
+        # Both default to 1000 in the Dockerfile as well. Set them in the
+        # environment (see the header) when your host ids are something else.
+        USER_UID: ${USER_UID:-1000}
+        USER_GID: ${USER_GID:-1000}
+    # The repository, and the two Claude credential files named below, are the
+    # only things mounted: no SSH agent, no Docker socket, nothing else from the
+    # host home directory. Note what that does and does not still contain. An
+    # agent run in here with permission checks skipped cannot reach your keys or
+    # your other repositories, but it does hold a live token for your Anthropic
+    # account. CONTRIBUTING.md spells out the trade.
     volumes:
       - .:/workspace:cached
       # Named volume so the container's venv is not clobbered by, and does not
       # clobber, a .venv built on the host.
       - dev-venv:/opt/venv
+      # Claude Code's OAuth tokens, at the paths its Linux build reads. Both are
+      # read-write on purpose: the CLI refreshes the token in place, and a
+      # read-only mount would let the session expire and stay expired. The
+      # container therefore shares one session with the host, so signing out in
+      # either signs out both.
+      #
+      # Targets are under /home/dev because that is the home directory the
+      # Dockerfile creates; change them together if USERNAME is overridden.
+      # macOS keeps these tokens in the Keychain instead, where a bind mount
+      # cannot reach them: run `claude auth login` once inside the container.
+      - ${HOME}/.claude/.credentials.json:/home/dev/.claude/.credentials.json
+      # Account and onboarding state. Without it the token still works, but the
+      # CLI treats every start as a first run.
+      - ${HOME}/.claude.json:/home/dev/.claude.json
+    # Passed through only when set on the host, for an API-key setup rather than
+    # a subscription login. Deliberately given no default: an empty
+    # ANTHROPIC_API_KEY outranks the OAuth credentials above and authenticates
+    # as nobody.
+    environment:
+      - ANTHROPIC_API_KEY
     working_dir: /workspace
     # No ports published: the test suite never binds one. Add a mapping here
     # deliberately if you want to run the app inside this container.

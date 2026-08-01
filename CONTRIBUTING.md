@@ -8,7 +8,9 @@ voice cloning behind an async job queue, with a minimal web UI on top.
 > The gate, dev container and code style sections were written on 2026-07-30 from
 > the existing codebase. The release, code style and AI agent sections were
 > revised on 2026-08-01 following a direction change recorded in
-> [DESIGN.md](DESIGN.md).
+> [DESIGN.md](DESIGN.md). The dev container section was rewritten on 2026-08-01
+> when that container gained Claude Code, a non-root user, and the credential
+> mounts it needs.
 
 This document is the single source of truth for how to develop, test, and ship
 changes. It is written for humans first; an [automated-agent section](#for-ai-agents)
@@ -80,19 +82,53 @@ known deviation with measurements recorded in [DESIGN.md](DESIGN.md); do not
 
 ### Work in the development container
 
-Optional for humans, and the intended sandbox for autonomous agent runs. It
-mounts this repository and nothing else: no host home directory, no SSH agent,
-no Docker socket.
+Optional for humans, and where autonomous agent runs are meant to happen. It
+mounts this repository and two Claude Code credential files, and nothing else:
+no SSH agent, no Docker socket, nothing else from the home directory.
 
 ```bash
-make dev-up       # build, start, install dependencies
+USER_UID=$(id -u) USER_GID=$(id -g) make dev-up   # build, start, install deps
 make dev-verify   # run the gate inside the container
 make dev-down
 ```
 
-It is a CPU-only ~390 MB image built from `python:3.11-slim`, deliberately not
-from the 16.9 GB Coqui base: the suite mocks the TTS engine, so the gate needs
-no GPU, no CUDA, and no model weights.
+Both ids default to 1000 when unset. Pass your own if they differ, so that files
+the container writes into the repository are owned by you and the credential
+files stay readable to it.
+
+It builds `.devcontainer/Dockerfile.claude`: a CPU-only image from
+`python:3.11-slim`, deliberately not the 16.9 GB Coqui base, because the suite
+mocks the TTS engine and the gate needs no GPU, no CUDA, and no model weights.
+It runs as a non-root user and ships Claude Code, so an agent runs inside the
+container rather than on the host. That last part costs ~250 MB on top of the
+~390 MB base, for ~740 MB.
+
+`.devcontainer/Dockerfile` is the same image without the agent and without the
+non-root user. Point `docker-compose.dev.yml` back at it for a container with
+neither.
+
+**What the credential mounts cost.**
+`~/.claude/.credentials.json` and `~/.claude.json` are bind-mounted read-write,
+because the CLI refreshes its OAuth token in place and a read-only mount would
+let the session expire and stay expired. Two consequences, both worth knowing
+before running an agent in here with permission checks skipped:
+
+- The container holds a live token for your Anthropic account. Isolation from
+  your SSH keys, your other repositories, and the Docker daemon is unchanged,
+  but this is no longer a boundary against something that would spend your
+  subscription or read the account details and host project paths that
+  `~/.claude.json` carries.
+- Host and container share one session, because they share one token file.
+  Signing out in either signs out both.
+
+macOS keeps those tokens in the Keychain, where a bind mount cannot reach them:
+run `claude auth login` once inside the container instead. For an API-key setup,
+`ANTHROPIC_API_KEY` is passed through whenever it is set in the environment.
+
+One-time migration: a `dev-venv` volume created before the image went non-root
+is owned by root, so `make install` cannot write to it. Either delete the volume
+and let `make dev-up` rebuild it, or keep its contents with
+`docker run --rm -v ai-tts_dev-venv:/v alpine chown -R "$(id -u):$(id -g)" /v`.
 
 ## The gate
 

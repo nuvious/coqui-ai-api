@@ -1,0 +1,86 @@
+# Development container for coqui-ai-api, with Claude Code installed.
+#
+# A fork of .devcontainer/Dockerfile with two differences and nothing else:
+#
+#   1. Claude Code is installed, so an agent runs inside the same sandbox it is
+#      editing instead of on the host.
+#   2. The image runs as a non-root user. USER_UID and USER_GID default to 1000
+#      and can be set to the invoking user's ids at build time, so files written
+#      into the bind-mounted repository belong to the person on the host rather
+#      than to root.
+#
+# Build it with the host user's ids:
+#
+#   docker build -f .devcontainer/Dockerfile.claude \
+#       --build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g) \
+#       -t coqui-ai-api-dev-claude .
+#
+# Everything else is inherited from the base file: no GPU, no CUDA, no model
+# weights, and the repository is still the only thing meant to be mounted. Adding
+# an agent does not change that blast radius, it is the reason for it.
+#
+# The image measures ~740 MB against the base file's ~390 MB. The difference is
+# almost entirely the Claude Code native build, which is ~250 MB under $HOME.
+FROM python:3.11-slim-bookworm
+
+ARG USERNAME=dev
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+# git for history the agent may need to read; make to run the gate; curl for uv's
+# installer, for Claude Code's installer, and for poking a locally running app.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        git \
+        make \
+    && rm -rf /var/lib/apt/lists/*
+
+# uv, pinned. Source: https://docs.astral.sh/uv/getting-started/installation/,
+# checked 2026-07-30.
+COPY --from=ghcr.io/astral-sh/uv:0.8.22 /uv /uvx /usr/local/bin/
+
+# The account the container runs as, created only when the ids are free. A host
+# uid that collides with a Debian system account is not an error: it just means
+# no passwd entry is added, and the rest still works because the image runs as a
+# numeric uid:gid pair with HOME set explicitly rather than by name lookup.
+RUN set -eux; \
+    if ! getent group "${USER_GID}" >/dev/null; then \
+        groupadd --gid "${USER_GID}" "${USERNAME}"; \
+    fi; \
+    if ! getent passwd "${USER_UID}" >/dev/null; then \
+        useradd --uid "${USER_UID}" --gid "${USER_GID}" \
+            --no-create-home --shell /bin/bash "${USERNAME}"; \
+    fi
+
+ENV HOME=/home/${USERNAME}
+
+# HOME and the virtualenv are created here rather than by useradd so that they
+# exist even when the ids collided above, and are left world-writable so that a
+# `docker run --user` override with some third uid still has somewhere to write.
+# The container mounts one repository and no host secrets, so this widens nothing
+# outside it.
+RUN set -eux; \
+    mkdir -p "${HOME}" /opt/venv; \
+    chown "${USER_UID}:${USER_GID}" "${HOME}" /opt/venv; \
+    chmod 0777 "${HOME}" /opt/venv
+
+# Keep the virtualenv inside the container rather than on the bind-mounted repo,
+# so a host .venv built for a different platform is never picked up.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1 \
+    PATH=/opt/venv/bin:${HOME}/.local/bin:$PATH
+
+USER ${USER_UID}:${USER_GID}
+
+# Claude Code, installed as the running user because its installer writes only
+# under $HOME. Deliberately not pinned to a version: the CLI updates itself in
+# place, so a build-time pin is undone by the first run. `stable` and `latest`
+# are the installer's own channel names and an exact version can be passed
+# instead. Source: https://code.claude.com/docs/en/setup, checked 2026-08-01.
+ARG CLAUDE_VERSION=stable
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_VERSION}"
+
+WORKDIR /workspace
