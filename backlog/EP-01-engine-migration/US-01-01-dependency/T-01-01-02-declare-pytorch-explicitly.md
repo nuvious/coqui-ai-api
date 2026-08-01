@@ -5,7 +5,7 @@ schema_version: '2'
 title: Declare PyTorch explicitly now the engine no longer bundles it
 epic: EP-01
 story: US-01-01
-status: todo
+status: blocked
 deps:
 - T-01-01-01
 scope:
