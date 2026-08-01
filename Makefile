@@ -50,8 +50,19 @@ typecheck:
 test:
 	$(RUN) pytest --cov
 
+# --ignore-vuln PYSEC-2026-2289: RCE via Trainer's torch.load. This project
+#   never trains; it only runs inference through TTS.api. Trainer is never
+#   imported.
+# --ignore-vuln PYSEC-2026-2290: RCE loading LightGlue weights. This project
+#   only ever loads XTTS v2; LightGlue is never loaded.
+# Both are pinned by transformers==5.0.0, itself required so `from TTS.api
+# import TTS` can still find transformers.pytorch_utils.isin_mps_friendly. See
+# DESIGN.md, "The transformers pin, and two accepted advisories". This list is
+# closed: CONTRIBUTING.md, "Additional rules for agents".
 audit:
-	$(RUN) pip-audit
+	$(RUN) pip-audit \
+		--ignore-vuln PYSEC-2026-2289 \
+		--ignore-vuln PYSEC-2026-2290
 
 # The gate. Ordered cheapest-first so a fast failure comes back fast.
 verify: format-check lint typecheck test audit

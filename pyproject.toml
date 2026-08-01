@@ -13,6 +13,17 @@ dependencies = [
     "gunicorn==23.0.0",
     "pyyaml==6.0.2",
     "coqui-tts==0.27.5",
+    # coqui-tts stopped bundling PyTorch at 0.27.4 (DESIGN.md, "The engine
+    # dependency"). The version floor matches coqui-tts's own `cpu`/`cuda`
+    # extras, which both require torch>=2.2 and differ only by which package
+    # index serves the wheel, not by this requirement string. torchaudio is
+    # required alongside it: TTS.tts.models.xtts imports it unconditionally,
+    # so `from TTS.api import TTS` fails without it too. torchcodec is
+    # required from torch 2.9 on: torch itself raises ImportError for audio IO
+    # without it (coqui-tts's `codec` extra names the same requirement).
+    "torch>=2.2",
+    "torchaudio>=2.2",
+    "torchcodec>=0.8.0",
 ]
 
 [project.scripts]
@@ -21,6 +32,34 @@ coqui-ai-api = "coqui_ai_api.app:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# transformers is transitive through coqui-tts, not a direct dependency, so it
+# is constrained rather than listed above. Pinned to 5.0.0 exactly: the newest
+# release that still exports `transformers.pytorch_utils.isin_mps_friendly`,
+# which coqui-tts 0.27.5's tortoise layer imports unconditionally. See
+# DESIGN.md, "The transformers pin, and two accepted advisories".
+#
+# torch is pinned to the CPU wheel index. This is not the production-build
+# decision DESIGN.md, "Open questions" ("which PyTorch does the project
+# install") reserves — the Dockerfile does not install from uv.lock today
+# (DESIGN.md, "Known deviations") and this task does not touch it (see
+# T-01-01-02's Out of scope). It is the narrower, already-settled constraint
+# that the dev container has no GPU and `make verify` must keep running in it
+# without pulling a multi-gigabyte CUDA stack it cannot use.
+[tool.uv]
+constraint-dependencies = [
+    "transformers==5.0.0",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchaudio = { index = "pytorch-cpu" }
+torchcodec = { index = "pytorch-cpu" }
 
 [dependency-groups]
 dev = [

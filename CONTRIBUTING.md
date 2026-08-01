@@ -37,8 +37,17 @@ of the service.
 - **[uv](https://docs.astral.sh/uv/)** for dependency and environment management
   (`pyproject.toml` + `uv.lock`).
 - **make**, which is how the gate is run.
+- Nothing to install by hand for PyTorch. `coqui-tts` stopped bundling it at
+  0.27.4, so `pyproject.toml` now declares `torch`, `torchaudio` and
+  `torchcodec` directly, pinned to the CPU wheel index
+  (`download.pytorch.org/whl/cpu`) via `[tool.uv.sources]`. `make install`
+  fetches them like any other dependency. This is a dev-container constraint,
+  not the project's production choice — see [DESIGN.md](DESIGN.md), "Open
+  questions", "Which PyTorch does the project install".
 - For actually generating audio: an NVIDIA GPU + drivers are recommended (CPU works
   but is slow), and the XTTS v2 model weights (downloaded automatically on first run).
+  A GPU-accelerated `torch` is not what `make install` gives you; swapping the
+  CPU wheel for a CUDA one is a manual override of `[tool.uv.sources]`.
 
 ### Set up a development environment
 
