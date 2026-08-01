@@ -5,7 +5,7 @@ schema_version: '2'
 title: Rebase the Dockerfile onto a slim base and install from uv.lock
 epic: EP-01
 story: US-01-02
-status: blocked
+status: todo
 deps:
 - T-01-01-03
 scope:
