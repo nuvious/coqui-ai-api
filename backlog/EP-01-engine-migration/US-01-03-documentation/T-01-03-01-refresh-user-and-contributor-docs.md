@@ -7,7 +7,7 @@ epic: EP-01
 story: US-01-03
 status: todo
 deps:
-- T-01-02-03
+- T-01-02-01
 scope:
 - README.md
 - CONTRIBUTING.md

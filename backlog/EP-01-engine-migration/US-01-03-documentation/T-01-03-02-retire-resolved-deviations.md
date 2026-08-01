@@ -27,11 +27,18 @@ tell which entries are live.
 
 - [ ] Every deviation this epic actually resolved is deleted from `DESIGN.md`,
       not marked as fixed. The candidates are the `TTS==0.22.0` dependency, the
-      Python ceiling, the `uv.lock` mismatch, the inherited vulnerability surface,
-      and possibly the smoke-test-in-CI entry.
-- [ ] Every deviation this epic did **not** resolve is still there, and its text
-      is still accurate. Do not delete one because the epic was supposed to fix it.
-      Check against what T-01-02-03 measured.
+      Python ceiling, and the `uv.lock` mismatch.
+- [ ] The **inherited vulnerability surface** and **smoke-test-on-CI** deviations
+      are **not** deleted. They depend on a measurement of the migrated image that
+      was descoped from this epic on 2026-08-01 to maintainer-run future work (see
+      `DESIGN.md`, "Future work", "Measure and scan the migrated image"). Nothing
+      in this epic measured the result, so leave them standing, re-stated as
+      pending that measurement rather than asserting the migration resolved them.
+      Deleting a deviation the epic never measured resolved is exactly the failure
+      this task exists to prevent.
+- [ ] Every other deviation this epic did **not** resolve is still there, and its
+      text is still accurate. Do not delete one because the epic was supposed to
+      fix it.
 - [ ] The open questions this epic answered are moved into a recorded decision
       with a source and a date, following the pattern already used in "Standards
       and tooling decisions". The ones it did not answer stay open.

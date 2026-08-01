@@ -91,7 +91,9 @@ this one, which is why this task now owns both the base swap and the lock instal
 
 ## Out of scope
 
-- Measuring the result and scanning it, which is T-01-02-03.
+- Measuring the result and scanning it, which was descoped to maintainer-run
+  future work on 2026-08-01 (see `DESIGN.md`, "Future work", "Measure and scan the
+  migrated image"). It needs Docker and network no autonomous session has.
 - Retiring the `DESIGN.md` known deviations this resolves. US-01-03 retires
   deviations once the whole story is verified on the host.
 - The development container (`.devcontainer/Dockerfile`), which is a different
