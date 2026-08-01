@@ -179,9 +179,10 @@ Two things are deliberately outside the gate:
 - **`make smoke`** builds the runtime image and checks it serves `/health` and the
   OpenAPI spec. It is not in CI: that started as a disk-space limit from the old
   16.9 GB pre-built base, and whether the slim base now fits a standard
-  GitHub-hosted runner is measurement T-01-02-03 owns, not decided here (see
-  DESIGN.md, "Known deviations"). Run it locally after changing the `Dockerfile`
-  or the entrypoint.
+  GitHub-hosted runner is maintainer-run future work, not decided here (see
+  DESIGN.md, "Known deviations" and "Future work", "Measure and scan the
+  migrated image"). Run it locally after changing the `Dockerfile` or the
+  entrypoint.
 
 ## Testing
 

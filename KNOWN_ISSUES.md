@@ -18,16 +18,14 @@ deviations" or "Open questions". This file is the short list.
 
 ## Dependencies and the container image
 
-- **The project depends on the unmaintained `TTS==0.22.0`.** Coqui AI shut down
-  in January 2024. The maintained fork is `coqui-tts`. Migrating to it is EP-01.
-- **The published container image carries a large inherited vulnerability
-  surface.** A Trivy scan on 2026-07-30 found 435 HIGH and 24 CRITICAL findings
-  in `ghcr.io/nuvious/coqui-ai-api`, essentially all of them from the 2023-era
-  base image rather than from this project's own code. `pip-audit` cannot see
-  them because it only sees what the project installs.
-- **The image is not built from `uv.lock`.** The versions the gate audits are not
-  the versions that ship.
-- **Python is capped below 3.12** by the `TTS==0.22.0` pin.
+- **The published container image's vulnerability surface has not been
+  remeasured since the engine migration.** A Trivy scan on 2026-07-30, against
+  the old `TTS==0.22.0`-based image, found 435 HIGH and 24 CRITICAL findings,
+  essentially all of them from the 2023-era base image rather than from this
+  project's own code. The migration to a slim base is expected to shrink this,
+  but nothing has re-run the scan against the shipped image yet. Descoped to
+  maintainer-run future work; full reasoning in DESIGN.md, "Future work",
+  "Measure and scan the migrated image".
 - **The engine pins `transformers==5.0.0`, which carries two accepted CVEs.**
   `coqui-tts` 0.27.5 cannot import on `transformers > 5.0.0` (it uses a symbol
   removed in 5.1.0), and no `transformers` release both imports and audits fully
@@ -43,10 +41,13 @@ deviations" or "Open questions". This file is the short list.
 - **No test exercises real synthesis.** The suite mocks the TTS engine, so a
   change that breaks actual audio generation passes the gate. There is no GPU
   runner and no real-model end-to-end check.
-- **`make smoke` does not run in CI.** The 16.9 GB base image is at or over the
-  free disk on a standard GitHub-hosted runner, so a `Dockerfile` or entrypoint
-  break can reach `main` without CI noticing. Run it locally after touching
-  either.
+- **`make smoke`'s fit on a GitHub-hosted runner has not been reconfirmed since
+  the engine migration.** The old 16.9 GB base image was at or over the free
+  disk on a standard runner, which is why `make smoke` runs locally instead of
+  in CI. The migration to a slim base is expected to change that, but nothing
+  has measured the built image's size yet. Run `make smoke` locally after
+  touching the `Dockerfile` or entrypoint until that measurement happens; full
+  reasoning in DESIGN.md, "Future work", "Measure and scan the migrated image".
 
 ## Runtime behaviour
 

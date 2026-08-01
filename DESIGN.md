@@ -459,37 +459,27 @@ Each needs a decision before anything acts on it.
 - **There is no `/v1/audio/speech` endpoint.** The
   [Compatibility target](#compatibility-target) above describes the intent. No
   compatibility surface exists in the code yet.
-- **The project depends on the unmaintained `TTS==0.22.0`, not on the fork.**
-  `pyproject.toml` pins `tts==0.22.0` and the `Dockerfile` builds from
-  `ghcr.io/coqui-ai/tts:v0.22.0`. See [The engine dependency](#the-engine-dependency)
-  for what is meant instead. The four deviations below are all downstream of this
-  one and are expected to resolve with it.
-- **The container image is not built from `uv.lock`.** `make verify` audits the
-  locked resolution; the image resolves fresh at build time, so the versions
-  audited are not the versions shipped. Measured on 2026-07-30: constraining the
-  image to the lock produces a working image but grows it from 17.1 GB to 32.6 GB
-  (a second full CUDA 13 stack) and moves transformers 4.36 to 5.9 and spacy 3.7
-  to 3.8 underneath `TTS==0.22.0`. The host lock and the base image are two
-  incompatible resolutions of the same ML stack. 129 of the lock's 176 packages
-  are already present in the base image. The cause is the base image bundling its
-  own CUDA-matched torch; `coqui-tts` stopped bundling torch at 0.27.4, which is
-  why the fork is expected to resolve this rather than the measurement being
-  re-run against the same design.
-- **The runtime image inherits a large, dated vulnerability surface.** A Trivy
-  scan of `ai-tts-coqui-ai-api:latest` on 2026-07-30 found **435 HIGH and 24
-  CRITICAL** findings: 408 from Ubuntu 22.04 OS packages (394 of those from
-  `linux-libc-dev` 5.15.0-91.101 alone), and the rest from Python packages baked
-  into the base image, including Pillow 10.1.0, torch 2.1.1+cu118,
-  transformers 4.36.0, nltk 3.8.1, urllib3 2.1.0 and aiohttp 3.9.1. None of this
-  is reachable by `pip-audit`, which only sees what the project installs. Since
-  2026-08-01 the image is the committed primary distribution channel, so this is
-  a defect in a shipped artifact.
-- **The container smoke test cannot run on GitHub-hosted runners.** The base
-  image is 16.9 GB, at or over the free disk a standard runner has. `make smoke`
-  therefore runs locally and is not part of CI, which means a Dockerfile break can
-  reach `main` without CI noticing. An image built on a base that does not bundle
-  torch is expected to be small enough to change this, which would put `make smoke`
-  back in reach of CI. Not measured yet.
+- **The runtime image's vulnerability surface has not been remeasured since the
+  engine migration.** The existing figure — a Trivy scan of the old
+  `TTS==0.22.0`-based image on 2026-07-30, finding **435 HIGH and 24 CRITICAL**
+  findings, most of them from the 2023-era Ubuntu base rather than this
+  project's own code — predates the move to the slim base in
+  [The runtime image base, and which PyTorch it ships](#the-runtime-image-base-and-which-pytorch-it-ships).
+  A base that no longer bundles a CUDA-matched torch is expected to shrink this
+  number, but nothing in this epic re-ran the scan, so the surface is unmeasured
+  against the shipped image, not resolved. This measurement was descoped from
+  this epic on 2026-08-01 to maintainer-run future work (formerly
+  T-01-02-03, which needs Docker and network access an autonomous session does
+  not have); see [Future work](#future-work), "Measure and scan the migrated
+  image".
+- **`make smoke`'s fit on a GitHub-hosted runner has not been reconfirmed since
+  the engine migration.** The prior figure — the old image at 16.9 GB, at or
+  over a standard runner's free disk — is why `make smoke` runs locally instead
+  of in CI. A base that no longer bundles a CUDA-matched torch is expected to be
+  small enough to change that, but nothing in this epic measured the built
+  image's size, so `make smoke` stays off CI until that measurement happens.
+  Descoped alongside the vulnerability-surface measurement above, on 2026-08-01;
+  see [Future work](#future-work), "Measure and scan the migrated image".
 
 ## Open questions
 
@@ -530,16 +520,21 @@ dropped. None of these is an epic yet.
   embeddable in MkDocs or Sphinx. The `[scalar]` extra is already a dependency.
   Note that Redoc's static build is self-contained but its code samples require
   hand-authored `x-codeSamples`, so it does not auto-generate snippets.
-- **Scan the built image** (Trivy) as part of a release, once the base-image
-  question is settled. A local scan is possible today via the `aquasec/trivy`
-  image. The 2026-07-30 baseline is recorded under
-  [Known deviations](#known-deviations).
+- **Measure and scan the migrated image.** Descoped from EP-01 on 2026-08-01
+  (formerly T-01-02-03, "Record the migrated image size and Trivy scan")
+  because it needs Docker and network access an autonomous session does not
+  have. A maintainer, on a machine with Docker, should: build the shipped image
+  and record its size beside the 2026-07-30 baseline (16.9 GB base / 17.1 GB
+  built); Trivy-scan the shipped image, the same tool used for that baseline,
+  and compare its HIGH/CRITICAL counts to the same baseline (435 HIGH / 24
+  CRITICAL); and check the built size against a standard GitHub-hosted
+  runner's free disk to decide whether `make smoke` can return to CI. See
+  [Known deviations](#known-deviations): both the vulnerability-surface and the
+  `make smoke`-on-CI deviations stand, unmeasured, until this runs.
 - **Real-model end-to-end test.** Needs a GPU runner and multi-gigabyte weights,
   so it can never be part of `make verify`. The engine migration raises its value:
   it is the only check that would catch a synthesis regression between engine
   versions.
-- **Return `make smoke` to CI**, if the migrated image turns out to fit on a
-  standard GitHub-hosted runner.
 - **A tag-triggered release workflow** that builds and attaches the wheel and
   sdist, replacing the manual steps in `CONTRIBUTING.md`.
 - **Publishing to PyPI.** Would use Trusted Publishing, which is PyPA's current
