@@ -5,7 +5,7 @@ schema_version: '2'
 title: Rebase the Dockerfile off the 2023 Coqui base image
 epic: EP-01
 story: US-01-02
-status: todo
+status: blocked
 deps:
 - T-01-01-03
 scope:
