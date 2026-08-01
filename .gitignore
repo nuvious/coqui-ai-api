@@ -5,3 +5,9 @@ workspace/*
 !workspace/.gitkeep
 config.yaml
 __pycache__
+
+# Test / coverage artifacts
+.coverage
+coverage.json
+htmlcov/
+.pytest_cache/

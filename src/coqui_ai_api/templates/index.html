@@ -4,17 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Coqui-AI Text to Speech</title>
-  <!-- Some css to make the UI adaptive to desktop/mobile -->
   <style>
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      width: 100%;
+      margin: 0; padding: 0; height: 100%; width: 100%;
     }
 
     body {
@@ -30,13 +24,45 @@
 
     h1 {
       font-size: clamp(1.8rem, 5vw, 3rem);
-      margin-bottom: 5vh;
+      margin-bottom: 3vh;
       text-align: center;
     }
 
-    form {
+    .tab-nav {
+      display: flex;
       width: 100%;
       max-width: 800px;
+      border-bottom: 2px solid #333;
+      margin-bottom: 2vh;
+    }
+
+    .tab-btn {
+      width: auto;
+      margin: 0;
+      padding: 10px 24px;
+      font-size: clamp(0.9rem, 3vw, 1.1rem);
+      background: none;
+      border: none;
+      border-bottom: 3px solid transparent;
+      border-radius: 0;
+      color: #aaa;
+      cursor: pointer;
+      transition: color 0.2s, border-color 0.2s;
+      margin-bottom: -2px;
+    }
+
+    .tab-btn:hover { color: #fff; background: none; }
+
+    .tab-btn.active {
+      color: #2e8b57;
+      border-bottom-color: #2e8b57;
+    }
+
+    .tab-panel { display: none; width: 100%; max-width: 800px; }
+    .tab-panel.active { display: flex; flex-direction: column; align-items: stretch; }
+
+    form {
+      width: 100%;
       display: flex;
       flex-direction: column;
       align-items: stretch;
@@ -68,6 +94,28 @@
       cursor: pointer;
     }
 
+    input[type="file"] {
+      width: 100%;
+      padding: 12px;
+      font-size: clamp(1rem, 4vw, 1.15rem);
+      border-radius: 8px;
+      border: 1px solid #444;
+      background-color: #1e1e1e;
+      color: #fff;
+      cursor: pointer;
+    }
+
+    input[type="file"]::file-selector-button {
+      background-color: #2e2e2e;
+      color: #fff;
+      border: 1px solid #555;
+      border-radius: 6px;
+      padding: 6px 14px;
+      margin-right: 12px;
+      cursor: pointer;
+      font-size: inherit;
+    }
+
     button {
       width: 100%;
       margin-top: 20px;
@@ -81,11 +129,10 @@
       transition: background-color 0.3s;
     }
 
-    button:hover {
-      background-color: #276f47;
-    }
+    button:hover { background-color: #276f47; }
+    button:disabled { background-color: #1a4f32; cursor: not-allowed; }
 
-    #status {
+    .status-area {
       width: 100%;
       max-width: 800px;
       margin-top: 20px;
@@ -93,152 +140,171 @@
       text-align: center;
     }
 
-    #status audio {
+    .status-area audio {
       display: block;
       width: 100%;
       margin-top: 12px;
     }
 
-    #status .dismiss-btn {
+    .status-area .dismiss-btn {
       background-color: #555;
+      margin-top: 12px;
     }
 
-    #status .dismiss-btn:hover {
-      background-color: #444;
+    .status-area .dismiss-btn:hover { background-color: #444; }
+
+    .progress-bar-wrap {
+      width: 100%;
+      background-color: #2a2a2a;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-top: 14px;
+      height: 18px;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background-color: #2e8b57;
+      transition: width 0.4s ease;
+      width: 0%;
+    }
+
+    .progress-label {
+      margin-top: 8px;
+      font-size: 0.95rem;
+      color: #aaa;
     }
   </style>
 </head>
 <body>
   <h1>Coqui-AI Text to Speech</h1>
-  <form id="generateForm">
-    <textarea id="textInput" rows="3" placeholder="Type your question here..."></textarea>
-    <select id="voiceSelect">
-      <option value="">Loading voices...</option>
-    </select>
-    <button type="submit">Generate</button>
-  </form>
 
-  <div id="status"></div>
+  <div class="tab-nav">
+    <button class="tab-btn active" data-tab="standard">Standard</button>
+    <button class="tab-btn" data-tab="longform">Long-form</button>
+  </div>
+
+  <!-- Standard tab -->
+  <div id="tab-standard" class="tab-panel active">
+    <form id="generateForm">
+      <textarea id="textInput" rows="3" placeholder="Type your text here..."></textarea>
+      <select id="voiceSelect"><option value="">Loading voices...</option></select>
+      <button type="submit">Generate</button>
+    </form>
+    <div id="status" class="status-area"></div>
+  </div>
+
+  <!-- Long-form tab -->
+  <div id="tab-longform" class="tab-panel">
+    <form id="longFormForm">
+      <input type="file" id="longFormFile" accept=".txt,text/plain" />
+      <select id="longFormVoice"><option value="">Loading voices...</option></select>
+      <button type="submit" id="longFormBtn">Generate</button>
+    </form>
+    <div id="lfStatus" class="status-area">
+      <div id="lfStatusText"></div>
+      <div class="progress-bar-wrap" id="lfProgressWrap" style="display:none">
+        <div class="progress-bar-fill" id="lfProgressFill"></div>
+      </div>
+      <div class="progress-label" id="lfProgressLabel"></div>
+    </div>
+  </div>
 
   <script>
-    // Get the text input
-    const textarea = document.getElementById('textInput');
-    const voiceSelect = document.getElementById('voiceSelect');
-    const statusDiv = document.getElementById('status');
+    // ── Tab switching ──────────────────────────────────────────────────────────
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+      });
+    });
 
-    // Populate voice dropdown
-    (async () => {
+    // ── Shared: populate voice dropdowns ─────────────────────────────────────
+    async function loadVoices(selectEl) {
       try {
         const res = await fetch('/voices');
         const data = await res.json();
-        voiceSelect.innerHTML = '';
+        selectEl.innerHTML = '';
         if (data.voices.length === 0) {
-          voiceSelect.innerHTML = '<option value="">No voices found</option>';
+          selectEl.innerHTML = '<option value="">No voices found</option>';
         } else {
           data.voices.forEach(v => {
             const opt = document.createElement('option');
             opt.value = v;
             opt.textContent = v.replace(/\.wav$/i, '');
-            voiceSelect.appendChild(opt);
+            selectEl.appendChild(opt);
           });
         }
-      } catch (e) {
-        voiceSelect.innerHTML = '<option value="">Failed to load voices</option>';
+      } catch {
+        selectEl.innerHTML = '<option value="">Failed to load voices</option>';
       }
-    })();
+    }
 
-    // Adjust text size to text inputed
+    loadVoices(document.getElementById('voiceSelect'));
+    loadVoices(document.getElementById('longFormVoice'));
+
+    // ── Standard tab ──────────────────────────────────────────────────────────
+    const textarea   = document.getElementById('textInput');
+    const voiceSelect = document.getElementById('voiceSelect');
+    const statusDiv  = document.getElementById('status');
+
     textarea.addEventListener('input', () => {
       textarea.style.height = 'auto';
       textarea.style.height = textarea.scrollHeight + 'px';
     });
 
-    // On generate button clicked
     document.getElementById('generateForm').addEventListener('submit', async function (e) {
       e.preventDefault();
-      //Get the text
       const text = textarea.value.trim();
       if (!text) return;
 
-      // Update the status
       statusDiv.textContent = 'Generating...';
       textarea.disabled = true;
 
       try {
-        const speaker_wav = voiceSelect.value;
-
-        // Make the call to create the generation job
-        const response = await fetch('/generate', {
+        const res = await fetch('/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, speaker_wav })
+          body: JSON.stringify({ text, speaker_wav: voiceSelect.value })
         });
+        if (!res.ok) throw new Error('Failed to start generation.');
+        const { job_id } = await res.json();
 
-        if (!response.ok) throw new Error('Failed to start generation.');
-
-        // Get the id from the response
-        const response_body = await response.json();
-        const job_id = response_body.job_id;
-
-        // Setup polling interval
-        const pollInterval = 2000;
         let attempts = 0;
         const maxAttempts = 30;
-
-        // Poll for the file using the /job endpoint
-        const pollForFile = async () => {
+        const poll = async () => {
           attempts++;
           try {
-            const downloadResponse = await fetch(`/job/${job_id}`);
-            if (downloadResponse.status === 200) {
-              const blob = await downloadResponse.blob();
-              const url = URL.createObjectURL(blob);
-
-              // Trigger browser download
+            const dl = await fetch(`/job/${job_id}`);
+            if (dl.status === 200) {
+              const blob = await dl.blob();
+              const url  = URL.createObjectURL(blob);
               const a = document.createElement('a');
-              a.href = url;
-              a.download = `${job_id}.wav`;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
+              a.href = url; a.download = `${job_id}.wav`;
+              document.body.appendChild(a); a.click(); document.body.removeChild(a);
 
-              // Show audio player for user-controlled playback
               const audio = document.createElement('audio');
-              audio.controls = true;
-              audio.src = url;
-
+              audio.controls = true; audio.src = url;
               const dismissBtn = document.createElement('button');
-              dismissBtn.textContent = 'Dismiss';
-              dismissBtn.className = 'dismiss-btn';
-
+              dismissBtn.textContent = 'Dismiss'; dismissBtn.className = 'dismiss-btn';
               let cleaned = false;
               const cleanup = async () => {
-                if (cleaned) return;
-                cleaned = true;
+                if (cleaned) return; cleaned = true;
                 URL.revokeObjectURL(url);
                 statusDiv.textContent = 'Cleaning up...';
-                try {
-                  await fetch(`/job/${job_id}`, { method: 'DELETE' });
-                } catch (err) {
-                  console.error(err);
-                }
+                try { await fetch(`/job/${job_id}`, { method: 'DELETE' }); } catch {}
                 statusDiv.textContent = 'Done.';
               };
-
               dismissBtn.addEventListener('click', cleanup);
-
               statusDiv.textContent = 'Ready:';
-              statusDiv.appendChild(audio);
-              statusDiv.appendChild(dismissBtn);
-
-              return;
-            } else if (downloadResponse.status === 404) {
-              // Assume on 404 the file is still generating
+              statusDiv.appendChild(audio); statusDiv.appendChild(dismissBtn);
+            } else if (dl.status === 404) {
               if (attempts < maxAttempts) {
                 statusDiv.textContent = `Still working... (${attempts})`;
-                setTimeout(pollForFile, pollInterval);
+                setTimeout(poll, 2000);
               } else {
-                // If it fails after 1 minute, give up
                 statusDiv.textContent = 'Generation timed out. Please try again.';
               }
             } else {
@@ -249,17 +315,124 @@
             statusDiv.textContent = 'An error occurred while downloading the file.';
           }
         };
-
-        // Now actually poll for the file by calling the polling function
-        pollForFile();
-      } catch (error) {
-        console.error(error);
+        poll();
+      } catch (err) {
+        console.error(err);
         statusDiv.textContent = 'An error occurred during generation.';
       } finally {
-        textarea.value = '';
-        textarea.style.height = 'auto';
-        textarea.disabled = false;
+        textarea.value = ''; textarea.style.height = 'auto'; textarea.disabled = false;
       }
+    });
+
+    // ── Long-form tab ─────────────────────────────────────────────────────────
+    const lfStatusText   = document.getElementById('lfStatusText');
+    const lfProgressWrap = document.getElementById('lfProgressWrap');
+    const lfProgressFill = document.getElementById('lfProgressFill');
+    const lfProgressLabel= document.getElementById('lfProgressLabel');
+    const longFormBtn    = document.getElementById('longFormBtn');
+
+    function lfSetProgress(completed, total) {
+      const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+      lfProgressWrap.style.display = 'block';
+      lfProgressFill.style.width   = pct + '%';
+      lfProgressLabel.textContent  = `${completed} / ${total} sentences (${pct}%)`;
+    }
+
+    function lfReset() {
+      lfProgressWrap.style.display = 'none';
+      lfProgressFill.style.width   = '0%';
+      lfProgressLabel.textContent  = '';
+    }
+
+    document.getElementById('longFormForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const fileInput = document.getElementById('longFormFile');
+      const voiceSel  = document.getElementById('longFormVoice');
+
+      if (!fileInput.files.length) {
+        lfStatusText.textContent = 'Please select a text file.';
+        return;
+      }
+
+      longFormBtn.disabled = true;
+      lfReset();
+      lfStatusText.textContent = 'Uploading and enqueuing...';
+
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+      formData.append('speaker_wav', voiceSel.value);
+
+      let jobId;
+      try {
+        const res = await fetch('/generate/long-form', { method: 'POST', body: formData });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.message || 'Failed to start long-form generation.');
+        }
+        ({ job_id: jobId } = await res.json());
+      } catch (err) {
+        lfStatusText.textContent = 'Error: ' + err.message;
+        longFormBtn.disabled = false;
+        return;
+      }
+
+      lfStatusText.textContent = 'Processing...';
+
+      const poll = async () => {
+        try {
+          const res = await fetch(`/job/${jobId}/progress`);
+          const data = await res.json();
+
+          if (data.status === 'processing') {
+            lfSetProgress(data.completed, data.total);
+            lfStatusText.textContent = 'Processing...';
+            setTimeout(poll, 2000);
+          } else if (data.status === 'done') {
+            lfSetProgress(data.total, data.total);
+            lfStatusText.textContent = 'Downloading...';
+
+            const dl = await fetch(`/job/${jobId}`);
+            if (!dl.ok) throw new Error('Download failed.');
+            const blob = await dl.blob();
+            const url  = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url; a.download = `${jobId}.wav`;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+
+            const audio = document.createElement('audio');
+            audio.controls = true; audio.src = url;
+            const dismissBtn = document.createElement('button');
+            dismissBtn.textContent = 'Dismiss'; dismissBtn.className = 'dismiss-btn';
+            let cleaned = false;
+            const cleanup = async () => {
+              if (cleaned) return; cleaned = true;
+              URL.revokeObjectURL(url);
+              lfStatusText.textContent = 'Cleaning up...';
+              lfReset();
+              try { await fetch(`/job/${jobId}`, { method: 'DELETE' }); } catch {}
+              lfStatusText.textContent = 'Done.';
+            };
+            dismissBtn.addEventListener('click', cleanup);
+
+            lfStatusText.textContent = 'Ready:';
+            const statusDiv = document.getElementById('lfStatus');
+            statusDiv.appendChild(audio);
+            statusDiv.appendChild(dismissBtn);
+            longFormBtn.disabled = false;
+          } else {
+            lfStatusText.textContent = 'Generation failed. Please try again.';
+            lfReset();
+            longFormBtn.disabled = false;
+          }
+        } catch (err) {
+          console.error(err);
+          lfStatusText.textContent = 'An error occurred while checking progress.';
+          longFormBtn.disabled = false;
+        }
+      };
+
+      poll();
     });
   </script>
 </body>

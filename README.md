@@ -110,9 +110,47 @@ You can then call the `/job` endpoint with the request id to retrieve the genera
 curl http://localhost:5000/job/70341b89-e5e5-4b38-bb6b-7f242498ed83 -o output.wav
 ```
 
-If the file isn't ready a 404 will be returned. Finally, you can clean up the space on the server
-using the delete endpoint:
+If the file isn't ready a 404 will be returned. You can also poll a job's progress
+(useful for long-form jobs):
 
 ```bash
-curl -X DELETE http://localhost:5000/delete/70341b89-e5e5-4b38-bb6b-7f242498ed83
+curl http://localhost:5000/job/70341b89-e5e5-4b38-bb6b-7f242498ed83/progress
 ```
+
+Finally, you can clean up the space on the server using the delete endpoint:
+
+```bash
+curl -X DELETE http://localhost:5000/job/70341b89-e5e5-4b38-bb6b-7f242498ed83
+```
+
+#### Voice cloning with a specific sample
+
+Drop additional named samples (e.g. `rick.wav`) into `workspace/`, list them with
+`GET /voices`, and pass the basename via the optional `speaker_wav` field:
+
+```bash
+curl http://localhost:5000/voices
+curl -X POST http://localhost:5000/generate \
+  -H "Content-Type: application/json" \
+  -d '{"text": "This is a test.", "speaker_wav": "rick.wav"}'
+```
+
+#### Long-form generation
+
+Upload a plain-text file to have it split into sentences, synthesised, and
+concatenated into a single WAV:
+
+```bash
+curl -X POST http://localhost:5000/generate/long-form \
+  -F "file=@chapter1.txt" \
+  -F "speaker_wav=rick.wav"
+```
+
+This returns a `job_id`; poll `/job/<id>/progress` until `status` is `done`, then
+download it from `/job/<id>`.
+
+## Development
+
+Contributions are welcome. See **[CONTRIBUTING.md](CONTRIBUTING.md)** for how to set
+up a development environment, run the test suite, and the project's coverage
+requirements.
