@@ -5,7 +5,7 @@ schema_version: '2'
 title: Record the migrated image size and Trivy scan
 epic: EP-01
 story: US-01-02
-status: todo
+status: blocked
 deps:
 - T-01-02-01
 scope:
