@@ -32,6 +32,7 @@ os.environ["OUTPUT_DIR"] = str(_WORKSPACE)
 os.environ["SPEAKER_WAV"] = str(_WORKSPACE / "speaker.wav")
 
 from coqui_ai_api import app as app_module  # noqa: E402
+from coqui_ai_api.estimator import RateEstimator  # noqa: E402
 
 
 @pytest.fixture
@@ -67,3 +68,14 @@ def _reset_state():
         app_module.text_queue.get_nowait()
     with app_module.long_form_lock:
         app_module.long_form_jobs.clear()
+    with app_module.jobs_lock:
+        app_module.jobs.clear()
+    with app_module.expiration_timers_lock:
+        for timer in app_module.expiration_timers.values():
+            timer.cancel()
+        app_module.expiration_timers.clear()
+    app_module.estimator = RateEstimator()
+    app_module.model_loaded.clear()
+    with app_module.worker_state_lock:
+        app_module.worker_started_at = None
+        app_module.current_job = None

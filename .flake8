@@ -1,0 +1,22 @@
+# flake8 does not read pyproject.toml, so its configuration lives here.
+#
+# max-line-length and extend-ignore are the minimal Black-compatible settings
+# Black documents itself. Source:
+# https://black.readthedocs.io/en/stable/guides/using_black_with_other_tools.html,
+# checked 2026-07-30.
+#
+# max-complexity enables the mccabe complexity check, which flake8 bundles but
+# leaves off unless a limit is set. Source: https://flake8.pycqa.org/en/latest/user/options.html,
+# checked 2026-07-30.
+[flake8]
+max-line-length = 88
+extend-ignore = E203,E701
+max-complexity = 10
+exclude =
+    .git,
+    .venv,
+    __pycache__,
+    build,
+    dist,
+    models,
+    workspace

@@ -24,6 +24,7 @@ def _drain(queue):
 
 # --- POST /generate ---------------------------------------------------------
 
+
 class TestGenerate:
     def test_returns_201_and_enqueues(self, app, client, output_dir):
         resp = client.post("/generate", json={"text": "Hello there."})
@@ -70,6 +71,7 @@ class TestGenerate:
 
 # --- GET /job/<id> ----------------------------------------------------------
 
+
 class TestGetJob:
     def test_404_when_missing(self, client, output_dir):
         resp = client.get(f"/job/{uuid.uuid4()}")
@@ -84,6 +86,7 @@ class TestGetJob:
 
 
 # --- DELETE /job/<id> -------------------------------------------------------
+
 
 class TestDeleteJob:
     def test_204_when_present(self, client, output_dir):
@@ -104,14 +107,52 @@ class TestDeleteJob:
         _write_wav(output_dir / f"{job_id}.wav")
         with app.long_form_lock:
             app.long_form_jobs[job_id] = {
-                "total": 1, "completed": 1, "status": "done", "segments": [],
+                "total": 1,
+                "completed": 1,
+                "status": "done",
+                "segments": [],
             }
         resp = client.delete(f"/job/{job_id}")
         assert resp.status_code == 204
         assert job_id not in app.long_form_jobs
 
+    def test_removes_registry_entry_and_cancels_timer(self, app, client, output_dir):
+        job_id = str(uuid.uuid4())
+        _write_wav(output_dir / f"{job_id}.wav")
+        app.register_job(job_id, kind="single", word_count=2)
+        app._schedule_expiration(job_id)
+        assert job_id in app.expiration_timers
+
+        resp = client.delete(f"/job/{job_id}")
+
+        assert resp.status_code == 204
+        assert job_id not in app.jobs
+        assert job_id not in app.expiration_timers
+
+    def test_purges_long_form_parent_and_segments(self, app, client, output_dir):
+        parent_id = str(uuid.uuid4())
+        seg_id = str(uuid.uuid4())
+        _write_wav(output_dir / f"{parent_id}.wav")
+        app.register_job(parent_id, kind="long_form_parent", word_count=4)
+        app.register_job(seg_id, kind="segment", word_count=4, parent_job_id=parent_id)
+        with app.long_form_lock:
+            app.long_form_jobs[parent_id] = {
+                "total": 1,
+                "completed": 1,
+                "status": "done",
+                "segments": [seg_id],
+            }
+
+        resp = client.delete(f"/job/{parent_id}")
+
+        assert resp.status_code == 204
+        assert parent_id not in app.jobs
+        assert seg_id not in app.jobs
+        assert parent_id not in app.long_form_jobs
+
 
 # --- POST /generate/long-form -----------------------------------------------
+
 
 class TestGenerateLongForm:
     def test_201_enqueues_segments_and_tracks(self, app, client, output_dir):
@@ -128,7 +169,9 @@ class TestGenerateLongForm:
         assert len(tasks) == 3
         assert all(t["parent_job_id"] == job_id for t in tasks)
         assert [t["text"] for t in tasks] == [
-            "First sentence.", "Second sentence.", "Third sentence.",
+            "First sentence.",
+            "Second sentence.",
+            "Third sentence.",
         ]
 
         job = app.long_form_jobs[job_id]
@@ -165,18 +208,23 @@ class TestGenerateLongForm:
 
 # --- GET /job/<id>/progress -------------------------------------------------
 
+
 class TestProgress:
     def test_long_form_job(self, app, client, output_dir):
         job_id = str(uuid.uuid4())
         with app.long_form_lock:
             app.long_form_jobs[job_id] = {
-                "total": 5, "completed": 2, "status": "processing", "segments": [],
+                "total": 5,
+                "completed": 2,
+                "status": "processing",
+                "segments": [],
             }
         resp = client.get(f"/job/{job_id}/progress")
         body = resp.get_json()
-        assert body == {
-            "job_id": job_id, "total": 5, "completed": 2, "status": "processing",
-        }
+        assert body["job_id"] == job_id
+        assert body["total"] == 5
+        assert body["completed"] == 2
+        assert body["status"] == "processing"
 
     def test_single_job_done(self, client, output_dir):
         job_id = str(uuid.uuid4())
@@ -185,6 +233,10 @@ class TestProgress:
         body = resp.get_json()
         assert body["status"] == "done"
         assert body["completed"] == 1 and body["total"] == 1
+        assert body["position"] in (0, None)
+        assert body["generation_seconds"] == 0
+        assert body["queue_seconds"] == 0
+        assert body["total_seconds"] == 0
 
     def test_single_job_processing(self, client, output_dir):
         job_id = str(uuid.uuid4())
@@ -195,6 +247,7 @@ class TestProgress:
 
 
 # --- GET /voices ------------------------------------------------------------
+
 
 def test_voices_lists_named_wavs(client, output_dir):
     _write_wav(output_dir / "rick.wav")

@@ -1,0 +1,6 @@
+{
+    "sonarlint.connectedMode.project": {
+        "connectionId": "https-sonar-cheeseman-club",
+        "projectKey": "nuvious_coqui-ai-api_4d5a2276-ddf7-482f-85b8-33f2d4fc1e05"
+    }
+}

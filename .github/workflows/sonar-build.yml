@@ -1,8 +1,13 @@
 name: Scan with SonarQube
 
+# Server-side analysis, deliberately separate from `make verify`, which must stay
+# runnable offline. Pull requests are scanned for decoration only; the quality
+# gate blocks on push, which is what SonarSource's own guidance recommends.
+
 on:
   push:
     branches:
+      - main
       - dev
   pull_request:
     types: [opened, synchronize, reopened]
@@ -11,20 +16,20 @@ jobs:
   build:
     name: Scan with SonarQube
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+          fetch-depth: 0 # Shallow clones should be disabled for a better relevancy of analysis
       - uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-      # If you wish to fail your job when the Quality Gate is red, uncomment the
-      # following lines. This would typically be used to fail a deployment.
-      # We do not recommend to use this in a pull request. Prefer using pull request
-      # decoration instead.
-      # - uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b # v1.2.0
-      #   timeout-minutes: 5
-      #   env:
-      #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      # Fails the run on a red quality gate. Push only: SonarSource does not
+      # recommend this action on pull requests, preferring PR decoration there.
+      - uses: SonarSource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b # v1.2.0
+        if: github.event_name == 'push'
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}

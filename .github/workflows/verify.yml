@@ -1,13 +1,19 @@
-name: Tests
+name: Verify
+
+# CI runs the same gate a contributor runs locally: `make verify`. Adding a check
+# means adding it to the Makefile, never to this file, so the two can never drift.
 
 on:
   push:
     branches:
       - main
+      - dev
   pull_request:
+  # Callable so publishing workflows can require the gate before they run.
+  workflow_call:
 
 jobs:
-  test:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -22,7 +28,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --dev
+        run: make install
 
-      - name: Run tests with coverage gate
-        run: uv run pytest --cov
+      - name: Run the gate
+        run: make verify

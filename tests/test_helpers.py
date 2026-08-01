@@ -4,8 +4,6 @@ import os
 import uuid
 import wave
 
-import pytest
-
 
 def _write_wav(path, frames=b"\x00\x00" * 100, framerate=22050):
     """Write a minimal mono 16-bit PCM wav file."""
@@ -17,6 +15,7 @@ def _write_wav(path, frames=b"\x00\x00" * 100, framerate=22050):
 
 
 # --- _split_sentences -------------------------------------------------------
+
 
 class TestSplitSentences:
     def test_splits_on_sentence_terminators(self, app):
@@ -45,12 +44,14 @@ class TestSplitSentences:
 
 # --- _get_filename ----------------------------------------------------------
 
+
 def test_get_filename_joins_output_dir(app, output_dir):
     job_id = "abc-123"
     assert app._get_filename(job_id) == os.path.join(str(output_dir), "abc-123.wav")
 
 
 # --- _list_speaker_wavs -----------------------------------------------------
+
 
 class TestListSpeakerWavs:
     def test_lists_named_wavs_only(self, app, output_dir):
@@ -76,6 +77,7 @@ class TestListSpeakerWavs:
 
 
 # --- _concatenate_wavs ------------------------------------------------------
+
 
 class TestConcatenateWavs:
     def test_concatenates_frames(self, app, output_dir):
