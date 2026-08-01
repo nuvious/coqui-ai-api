@@ -5,7 +5,7 @@ schema_version: '2'
 title: Refresh the user and contributor docs for the new engine
 epic: EP-01
 story: US-01-03
-status: done
+status: reopened
 deps:
 - T-01-02-01
 scope:
@@ -52,3 +52,7 @@ catches what falls between them.
 - `DESIGN.md`'s deviations list, which is T-01-03-02.
 - `KNOWN_ISSUES.md`, which is T-01-03-02.
 - Rewriting the API documentation. No endpoint changed in this epic.
+
+## Review notes
+
+The epic's base-image swap (python:3.11-slim-bookworm, done in T-01-02-01) left two developer-facing files asserting the old 16.9 GB base as current fact. Your task's remit is to 'catch what falls between' the other tasks, but its scope list (README/CONTRIBUTING/CHANGELOG) did not include these two files, so the drift survived. Fix both: (1) Makefile line 73 in the `smoke` target comment reads 'not run in CI: the base image is 16.9 GB, which is at or over the free disk a standard GitHub-hosted runner has. Run it on a machine that already has the base layer.' That reason is now false. Rewrite it to match CONTRIBUTING.md 'The gate' (the 16.9 GB limit is historical; whether the slim base now fits a standard runner is unmeasured maintainer-run future work per DESIGN.md 'Measure and scan the migrated image'); do not assert a size the epic never measured. (2) .github/workflows/docker-build.yml header comment (lines 3-8) makes three now-stale claims: 'image publication is under re-evaluation' (contradicts DESIGN.md 'Distribution', which on this branch confirms the ghcr channel as the committed primary model as of 2026-08-01), 'The base image is 16.9 GB' (falsified by the slim rebase), and the 435 HIGH / 24 CRITICAL Trivy figure stated as the shipped image's surface (it is the pre-migration 2026-07-30 baseline; the migrated image is unmeasured per DESIGN.md 'Known deviations'). Correct all three to match DESIGN.md, framing the 16.9 GB and Trivy numbers as the historical baseline and removing the 'under re-evaluation' hedge that DESIGN.md has already retired. Do not restate DESIGN.md; cite it. Run `make verify` after. Note: if the orchestrator judges the docker-build.yml wording to belong to a distribution-owning epic rather than the engine migration, escalate that half rather than guessing; the Makefile 16.9 GB comment is unambiguously this epic's to fix.
