@@ -148,7 +148,7 @@ has been unmaintained since. [idiap/coqui-ai-TTS](https://github.com/idiap/coqui
 is the actively maintained fork, published to PyPI as
 [`coqui-tts`](https://pypi.org/project/coqui-tts/). Checked 2026-08-01.
 
-What changes, measured against the `TTS==0.22.0` this project pins today:
+What changed, measured against the `TTS==0.22.0` this project pinned before the migration:
 
 | | `TTS==0.22.0` | `coqui-tts` 0.27.5 |
 |---|---|---|
@@ -161,8 +161,8 @@ What changes, measured against the `TTS==0.22.0` this project pins today:
 
 Two of those matter more than the rest.
 
-The import path is unchanged, so the worker code in `app.py` is expected to need
-no change. This is a dependency and packaging migration, not a rewrite.
+The import path is unchanged, so the worker code in `app.py` needed no change.
+This was a dependency and packaging migration, not a rewrite.
 
 One thing did change about the import, and it caught an autonomous run by surprise
 on 2026-08-01, so it is recorded here. The *module path* is unchanged
@@ -170,14 +170,14 @@ on 2026-08-01, so it is recorded here. The *module path* is unchanged
 added a guard at the top of `TTS/__init__.py` that raises `ImportError` at import
 time when PyTorch is absent (`if not is_torch_available()...: raise
 ImportError(PYTORCH_IMPORT_ERROR)`). `TTS 0.22.0` bundled torch, so this guard
-never fired; the fork does not bundle torch, so it fires until the task that
-declares torch (T-01-01-02) runs. The consequence is sequencing,
-not a defect: `from TTS.api import TTS` cannot execute successfully in the window
-between dropping the old pin (T-01-01-01) and declaring torch (T-01-01-02), and
-any check meant to run in that window must prove the *module path* survived the
-fork without executing the package. The wheel's own file list does that: `TTS/api.py`
-appears in `importlib.metadata.files("coqui-tts")` without importing anything. The
-literal runtime import is proven once torch exists, in T-01-01-02.
+never fired; the fork does not bundle torch, so it fired until T-01-01-02
+declared torch. The consequence was sequencing, not a defect: `from TTS.api
+import TTS` could not execute successfully in the window between dropping the
+old pin (T-01-01-01) and declaring torch (T-01-01-02), and any check meant to
+run in that window had to prove the *module path* survived the fork without
+executing the package. The wheel's own file list did that: `TTS/api.py`
+appeared in `importlib.metadata.files("coqui-tts")` without importing anything.
+The literal runtime import was proven once torch existed, in T-01-01-02.
 
 This reinforces rather than complicates [The heavy imports are deferred](#the-heavy-imports-are-deferred):
 importing `TTS` was already something only the worker thread does, and it was
@@ -192,9 +192,10 @@ constraining the image to the lock produced a second full CUDA stack. A package
 that does not bundle torch, and that ships `cpu` and `cuda` extras built for uv,
 removes that conflict rather than working around it.
 
-Most of this document's [Known deviations](#known-deviations) terminate in the
-`TTS==0.22.0` pin. Migrating to the fork is therefore the highest-leverage piece
-of work in the backlog, and it is sequenced accordingly.
+At the time this decision was made, most of this document's [Known
+deviations](#known-deviations) traced back to the `TTS==0.22.0` pin, which is
+why migrating to the fork was the highest-leverage piece of work in the
+backlog and the epic was sequenced accordingly.
 
 The XTTS model weights still carry Coqui's non-commercial licence. The fork
 changes the maintenance story for the code, not the licence on the weights, so
