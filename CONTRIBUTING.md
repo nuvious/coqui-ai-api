@@ -353,6 +353,21 @@ and specific enough to be followed.
   DESIGN.md rather than escalating because you cannot check a source. It also
   means you cannot read the GitHub issue tracker, so `KNOWN_ISSUES.md` in the
   repository root is the copy you can read.
+- **Host-only checks are the maintainer's, not a bar you must clear.** Some
+  acceptance criteria can only be verified on a host the sandbox does not have:
+  anything that needs Docker (`docker build`, `make smoke`, comparing versions
+  inside a built image) or the network the run loop denies (resolving a CUDA
+  wheel index). The dev container has no Docker socket and no network, by design.
+  For a task like that your bar for "done" is: make the file changes correctly,
+  pass `make verify`, and run whatever offline check the task offers — then state
+  plainly in the task result which criteria are left for a maintainer to verify
+  on the host, and never claim a build, smoke run, or resolution you could not
+  execute. A well-formed task marks those host-only checks as maintainer-verified
+  rather than agent-blocking; reporting an honest "maintainer-verified on host"
+  for them completes the task, it does not fail it. If a task instead lists a
+  host-only check as an ordinary acceptance criterion you are expected to tick,
+  that mismatch is itself a spec gap — escalate it rather than looping on a box
+  you cannot check.
 
 ### Architecture
 

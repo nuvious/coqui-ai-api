@@ -5,7 +5,7 @@ schema_version: '2'
 title: Rebase the Dockerfile onto a slim base and install from uv.lock
 epic: EP-01
 story: US-01-02
-status: blocked
+status: todo
 deps:
 - T-01-01-03
 scope:
@@ -37,23 +37,36 @@ this one, which is why this task now owns both the base swap and the lock instal
 
 ## Acceptance criteria
 
+These are what an autonomous session must satisfy in-session: correct file
+changes plus a green `make verify`. The build-and-run checks that need Docker or
+the network the sandbox does not have are listed separately under
+[Maintainer verification (on host)](#maintainer-verification-on-host) below.
+Per `CONTRIBUTING.md`, "Additional rules for agents" ("Host-only checks are the
+maintainer's, not a bar you must clear"), those are **not agent-blocking**: make
+the changes below, pass the gate, and an honest "maintainer-verified on host"
+for the rest completes this task.
+
 - [ ] `Dockerfile` no longer references `ghcr.io/coqui-ai/tts`. The base is a
       slim image the project builds on (a `python:3.x-slim`, or a CUDA runtime
       image), **not** a pre-built engine image.
 - [ ] The image installs from `uv.lock`, not from an unconstrained
-      `pip3 install .`. The direct dependency versions inside the image match the
-      host lock: `docker run --rm <image> pip list` and `uv pip list` agree on
-      `coqui-tts`, `flask`, `flask-cors`, `flask-openapi3`, `gunicorn` and
-      `pyyaml`.
-- [ ] The image ships a **CUDA** build of torch and can reach a GPU, while the
-      default resolution `make verify` uses stays on the **CPU** index. The CUDA
-      build is opt-in — a `cuda` extra, or an equivalent build-time index
-      override, that only the image installs. `make verify` must keep running in
-      the CPU-only dev container. See `DESIGN.md`, "The runtime image base".
+      `pip3 install .`.
+- [ ] The image ships a **CUDA** build of torch, opt-in via a `cuda` extra or an
+      equivalent build-time index override that only the image installs, while
+      the default resolution `make verify` uses stays on the **CPU** index.
+      `make verify` must keep running in the CPU-only dev container. See
+      `DESIGN.md`, "The runtime image base".
+- [ ] The default CUDA wheel index actually resolves the
+      `torch`/`torchaudio`/`torchcodec` versions `uv.lock` pins. `cu121` does
+      **not**: it publishes no `torchcodec>=0.8.0` (the lock resolves `0.15.0`),
+      so a default `docker build` fails to resolve dependencies. Set the default
+      to `cu126`, which resolves the locked versions cleanly, and update the
+      Dockerfile comment that still calls the index "a recent CUDA build". See
+      [Review notes](#review-notes) for the full finding. Confirming the
+      resolution needs network the sandbox lacks, so the confirmation is
+      maintainer-verified below — but setting the correct default is the agent's.
 - [ ] The comment block in `Dockerfile` explaining why the lock was not used is
       removed, since it no longer describes the file.
-- [ ] The image builds. `docker build -t coqui-ai-api:migrate .` exits 0.
-- [ ] `make smoke` passes: the container serves `/health` and the OpenAPI spec.
 - [ ] The entrypoint is unchanged in behaviour. The container still starts
       gunicorn against `coqui_ai_api.app:app` on port 5000.
 - [ ] `docker-compose.yaml`'s GPU reservation block still makes sense against the
@@ -66,13 +79,30 @@ this one, which is why this task now owns both the base swap and the lock instal
       stage is stated, with why. `CONTRIBUTING.md` currently notes the container
       deliberately has no uv dependency; a multi-stage build keeps that property
       while still installing from the lock. Say which you did.
+- [ ] `make verify` passes.
 
-> [!IMPORTANT]
-> The development container has no Docker socket, by design, so a session cannot
-> build or run an image from inside it. Make the file changes and say plainly in
-> the task result that the build, the `pip list` version comparison, and
-> `make smoke` are maintainer-verified on the host. Do not claim a build,
-> comparison, or smoke run passed that you could not run.
+## Maintainer verification (on host)
+
+**Not agent-blocking** (`CONTRIBUTING.md`, "Additional rules for agents"). The
+development container has no Docker socket and no network, by design, so a
+session cannot run any of these. Make the file changes above, then say plainly
+in the task result that these are left for a maintainer on a host with Docker
+and network. **Do not claim any of them passed** — do not report a build,
+comparison, resolution, or smoke run you could not execute.
+
+- [ ] The image builds: `docker build -t coqui-ai-api:migrate .` exits 0.
+- [ ] The CUDA reinstall resolves against the default index. In a project env
+      synced to the lock, `uv pip install --index-url
+      https://download.pytorch.org/whl/cu126 --reinstall --dry-run "torch>=2.2"
+      "torchaudio>=2.2" "torchcodec>=0.8.0"` produces a resolution rather than
+      "No solution found". (This is the offline-of-Docker check the Review notes
+      describe; it still needs network, so it is a maintainer step, not an
+      in-session one.)
+- [ ] The direct dependency versions inside the image match the host lock:
+      `docker run --rm <image> pip list` and `uv pip list` agree on `coqui-tts`,
+      `flask`, `flask-cors`, `flask-openapi3`, `gunicorn` and `pyyaml`.
+- [ ] The image can reach a GPU on a host with the NVIDIA Container Toolkit.
+- [ ] `make smoke` passes: the container serves `/health` and the OpenAPI spec.
 
 ## Constraints
 
