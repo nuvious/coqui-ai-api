@@ -32,9 +32,13 @@ RUN uv sync --frozen --no-dev --no-editable
 # gunicorn, pyyaml -- stays exactly what uv.lock resolved. This is the
 # build-time index override DESIGN.md calls for: `make verify` and the dev
 # container never run this step, so the CPU resolution stays their default.
-# The index defaults to a recent CUDA build and is a build arg because which
-# CUDA series is right depends on the deployment host's driver.
-ARG TORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu121
+# The index defaults to cu126, the newest series that actually resolves the
+# torch/torchaudio/torchcodec versions uv.lock pins: cu121 and cu124 top out at
+# torchcodec 0.1.1/0.2.1, but the lock resolves torchcodec 0.15.0, which needs
+# torch 2.9+ and therefore cu126 (cu128 resolves too, but to torch 2.11.0
+# instead of the locked 2.13.0). It is a build arg because which CUDA series is
+# right depends on the deployment host's driver.
+ARG TORCH_CUDA_INDEX_URL=https://download.pytorch.org/whl/cu126
 RUN uv pip install --python /opt/venv/bin/python \
         --index-url "${TORCH_CUDA_INDEX_URL}" \
         --reinstall \
