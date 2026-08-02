@@ -5,7 +5,7 @@ schema_version: '2'
 title: Retire the deviations this epic resolved
 epic: EP-01
 story: US-01-03
-status: done
+status: reopened
 deps:
 - T-01-03-01
 scope:
@@ -63,3 +63,7 @@ tell which entries are live.
 - Planning the follow-on work for anything left unresolved. EP-03's review
   authors epics; this task records state.
 - `CHANGELOG.md`, which T-01-03-01 owns.
+
+## Review notes
+
+DESIGN.md, "The engine dependency", still describes the migration as pending and the retired pin as current, which violates epic AC #6 ("DESIGN.md ... no longer describe the TTS==0.22.0 pin as current"). Concretely: line ~151 reads "What changes, measured against the `TTS==0.22.0` this project pins today" -- "pins today" asserts the pin is current when it has been removed. The following prose ("the worker code in app.py is expected to need no change ... This is a dependency and packaging migration, not a rewrite") and the T-01-01-01/T-01-01-02 sequencing narrative are also written from a pre-migration standpoint. This section was outside T-01-03-02's original focus (its ACs targeted the deviations list and open questions, both handled correctly), but bringing DESIGN.md in line with what now exists is this task's remit and the epic's AC #6. Fix: reword the section so the pin reads as history (past tense) and the migration reads as completed rather than planned, without deleting the decision record, its source, or its 2026-08-01 date. Do not restate the outcome elsewhere; just correct the tense/framing. Re-run `make verify` after (it is unaffected, but confirm). Do NOT touch the vuln-surface or smoke-on-CI deviations -- they are correctly left standing.
