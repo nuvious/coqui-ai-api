@@ -6,7 +6,7 @@ title: Serve the OpenAI-compatible speech endpoint
 branch: feat/EP-02-openai-compatibility
 depends_on:
 - EP-01
-planning: pending
+planning: done
 review: pending
 ---
 
