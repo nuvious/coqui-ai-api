@@ -76,6 +76,63 @@ class TestListSpeakerWavs:
         assert app._list_speaker_wavs() == ["voice.wav"]
 
 
+# --- _resolve_voice ----------------------------------------------------------
+
+
+class TestResolveVoice:
+    def test_resolves_bare_basename(self, app, output_dir):
+        _write_wav(output_dir / "rick.wav")
+        assert app._resolve_voice("rick") == os.path.join(str(output_dir), "rick.wav")
+
+    def test_resolves_basename_with_suffix(self, app, output_dir):
+        _write_wav(output_dir / "rick.wav")
+        assert app._resolve_voice("rick.wav") == os.path.join(
+            str(output_dir), "rick.wav"
+        )
+
+    def test_unknown_voice_is_rejected(self, app, output_dir):
+        _write_wav(output_dir / "rick.wav")
+        with app.app.app_context():
+            response = app._resolve_voice("unknown")
+        assert response.status_code == 400
+        assert "GET /voices" in response.get_json()["message"]
+
+    def test_empty_voice_is_rejected(self, app, output_dir):
+        _write_wav(output_dir / "rick.wav")
+        with app.app.app_context():
+            response = app._resolve_voice("")
+        assert response.status_code == 400
+        assert "GET /voices" in response.get_json()["message"]
+
+    def test_no_alias_table_for_stock_names(self, app, output_dir):
+        _write_wav(output_dir / "rick.wav")
+        with app.app.app_context():
+            response = app._resolve_voice("alloy")
+        assert response.status_code == 400
+
+    def test_stock_name_resolves_when_deployer_publishes_it(self, app, output_dir):
+        _write_wav(output_dir / "alloy.wav")
+        assert app._resolve_voice("alloy") == os.path.join(str(output_dir), "alloy.wav")
+
+    def test_rejects_relative_path_traversal(self, app, output_dir):
+        _write_wav(output_dir / "rick.wav")
+        with app.app.app_context():
+            response = app._resolve_voice("../rick.wav")
+        assert response.status_code == 400
+
+    def test_rejects_absolute_path(self, app, output_dir):
+        _write_wav(output_dir / "rick.wav")
+        with app.app.app_context():
+            response = app._resolve_voice(str(output_dir / "rick.wav"))
+        assert response.status_code == 400
+
+    def test_never_falls_back_to_speaker_wav(self, app, output_dir):
+        _write_wav(output_dir / "speaker.wav")
+        with app.app.app_context():
+            response = app._resolve_voice("unknown")
+        assert response.status_code == 400
+
+
 # --- _concatenate_wavs ------------------------------------------------------
 
 

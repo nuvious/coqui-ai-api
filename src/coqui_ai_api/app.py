@@ -138,6 +138,28 @@ def _list_speaker_wavs() -> list[str]:
     return sorted(wavs)
 
 
+def _resolve_voice(voice: str) -> str | Response:
+    """Resolve a compatibility-endpoint ``voice`` to a speaker WAV path.
+
+    Matches against the same basenames ``GET /voices`` publishes
+    (``_list_speaker_wavs()``), accepting a published basename with or
+    without its ``.wav`` suffix. Anything else -- an empty string, an
+    unknown name, or a name carrying a directory component or an absolute
+    path -- returns a 400 naming ``GET /voices`` instead of falling back to
+    ``SPEAKER_WAV`` (`DESIGN.md`, "How `voice` resolves onto a named
+    sample").
+    """
+    if voice and os.path.basename(voice) == voice:
+        for candidate in _list_speaker_wavs():
+            stem = os.path.splitext(candidate)[0]
+            if voice == candidate or voice == stem:
+                return os.path.join(OUTPUT_DIR, candidate)
+    return make_response(
+        jsonify({"message": "Unknown voice. See GET /voices for available voices."}),
+        400,
+    )
+
+
 CONFIG = yaml.load(open(CONFIG_FILE, "r"), Loader=yaml.SafeLoader)
 
 info = Info(title="Coqui-AI API", version=__version__)
