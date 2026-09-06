@@ -201,7 +201,7 @@ The XTTS model weights still carry Coqui's non-commercial licence. The fork
 changes the maintenance story for the code, not the licence on the weights, so
 the disclaimer in `README.md` stands.
 
-### The transformers pin, and two accepted advisories
+### The transformers pin, and three accepted advisories
 
 Decided 2026-08-01, resolving an escalation from T-01-01-02.
 
@@ -238,22 +238,71 @@ single-purpose inference service does not exercise.
   `isin_mps_friendly`, and it already clears PYSEC-2025-217 and PYSEC-2026-2288,
   which a 4.x resolution would still carry. The pin trades four advisories for
   two.
-- **Ignore exactly two advisories in the gate**, each with its reachability
-  argument recorded next to the ignore:
+- **Ignore exactly the advisories listed below in the gate**, each with its
+  reachability argument recorded next to the ignore:
   - **PYSEC-2026-2289** — RCE via `Trainer`'s `torch.load`. This project never
     trains; it only runs inference through `TTS.api`. `Trainer` is never imported.
   - **PYSEC-2026-2290** — RCE loading LightGlue weights. This project only ever
     loads XTTS v2. LightGlue (an image-matching model) is never loaded.
+  - **CVE-2026-9856** — added 2026-09-06, see
+    [The third advisory](#the-third-advisory-cve-2026-9856) below.
 
 This is a deliberate, narrow exception, not a new standing policy. It is the
 project's only `pip-audit` ignore, it is tied to this specific upstream
 incompatibility, and **it is to be removed the moment `coqui-tts` allows
-`transformers >= 5.5.0`** — whether by raising its floor or by dropping the
-tortoise `isin_mps_friendly` import. Adding any *other* ignore — including a
-third one here, should `pip-audit` ever report a different advisory at 5.0.0 — is
-a maintainer decision reached by escalation, not something a task may do to go
-green. The rule is stated for agents in `CONTRIBUTING.md`, "Additional rules for
+`transformers >= 5.10.0`** — whether by raising its floor or by dropping the
+tortoise `isin_mps_friendly` import. That threshold was `>= 5.5.0` until
+2026-09-06; see below for why it moved.
+
+The list is **maintainer-owned**. Adding any *other* ignore — including a fourth
+one here, should `pip-audit` report a further advisory at 5.0.0 — is a maintainer
+decision reached by escalation, not something a task may do to go green. What a
+task session does in the meantime, so that one dependency advisory does not stop
+the whole backlog run, is specified in `CONTRIBUTING.md`, "Additional rules for
 agents".
+
+#### The third advisory: CVE-2026-9856
+
+Decided 2026-09-06, resolving an escalation from T-02-01-01.
+
+`pip-audit` began reporting **CVE-2026-9856** against `transformers` 5.0.0, fixed
+in **5.10.0**. It was not one of the two advisories accepted on 2026-08-01, so by
+the closed-list rule it halted the run rather than being absorbed silently — which
+is the rule working, not failing.
+
+The advisory is an arbitrary file write by path traversal. `save_pretrained()` on
+`PreTrainedTokenizerBase` and `ProcessorMixin` uses keys from the `chat_template`
+dictionary directly as filenames without validation, so a crafted
+`tokenizer_config.json` in an attacker-controlled Hugging Face Hub repository can
+escape the save directory when the victim saves the tokenizer or processor.
+
+**It is not reachable from this project**, on a stricter argument than the two
+advisories already accepted. Exploitation needs *both* halves of the chain, and
+this project has neither:
+
+- **`save_pretrained()` is never called.** Not in `src/`, not in `tests/`, and —
+  checked against the installed `coqui-tts` 0.27.5 tree on 2026-09-06 — the only
+  occurrence anywhere in the engine is a **commented-out** line in the tortoise
+  layer (`TTS/tts/layers/tortoise/autoregressive.py`), a layer XTTS-v2 inference
+  never executes.
+- **No `transformers` tokenizer or processor is loaded from an untrusted
+  repository.** XTTS v2 tokenizes with `TTS.tts.layers.xtts.tokenizer.VoiceBpeTokenizer`,
+  which is not a `PreTrainedTokenizerBase`; no `ProcessorMixin` subclass is
+  involved anywhere in the synthesis path; and the model this service loads is the
+  one named in `config.yaml`, resolved through Coqui's own model manager.
+
+Both halves would have to become false at once for this to matter, and either one
+alone is a change large enough to notice: adding a `save_pretrained()` call, or
+loading a `transformers` tokenizer/processor from a caller-supplied repository id.
+If a future change does either, this ignore must be re-argued, not carried
+forward.
+
+**The consequence for the pin.** The removal condition rises from
+`transformers >= 5.5.0` to **`>= 5.10.0`**, because that is now the floor at which
+all three advisories are fixed. That widens the gap the pin has to hold open —
+`isin_mps_friendly` still disappears at 5.1.0 — and is the reason
+[Future work](#future-work) now carries an item on escaping the pin outright
+rather than waiting on an upstream release.
 
 ### The runtime image base, and which PyTorch it ships
 
@@ -532,6 +581,27 @@ dropped. None of these is an epic yet.
   runner's free disk to decide whether `make smoke` can return to CI. See
   [Known deviations](#known-deviations): both the vulnerability-surface and the
   `make smoke`-on-CI deviations stand, unmeasured, until this runs.
+- **Escape the `transformers` pin instead of waiting for `coqui-tts`.** Recorded
+  2026-09-06, when a third advisory (CVE-2026-9856) pushed the pin's removal
+  condition from `transformers >= 5.5.0` to `>= 5.10.0`. See
+  [The transformers pin, and three accepted advisories](#the-transformers-pin-and-three-accepted-advisories).
+  The pin exists for one symbol: `coqui-tts` 0.27.5's tortoise layer imports
+  `transformers.pytorch_utils.isin_mps_friendly`, removed in 5.1.0. Inspected on
+  2026-09-06, that function is about ten lines — `torch.isin`, plus a tiling
+  workaround taken only on MPS with torch < 2.4, a combination this project's
+  CUDA/CPU deployment target never hits. Supplying it, rather than depending on
+  upstream to stop importing it, would let the project run `transformers >= 5.10.0`
+  and drop all three ignores permanently, with no `coqui-tts` release required.
+
+  This is **maintainer work, not an autonomous task**, and it is a spike before it
+  is a change: the shim is the easy part, and the risk is everything else
+  `coqui-tts` imports from `transformers` (`LogitsWarper`, `GPT2PreTrainedModel`,
+  `GPT2Config`, `transformers.modeling_outputs`, the `generation.utils` internals
+  `stream_generator.py` reaches into) having moved or gone between 5.0.0 and
+  5.10.0. Deciding that needs network access to install 5.10.0 and a real XTTS-v2
+  load to prove synthesis still works, neither of which a sandboxed session has.
+  If the spike finds the surface has drifted too far, the answer is to keep the
+  pin and the ignores and record that here; a failed spike is a result.
 - **Real-model end-to-end test.** Needs a GPU runner and multi-gigabyte weights,
   so it can never be part of `make verify`. The engine migration raises its value:
   it is the only check that would catch a synthesis regression between engine

@@ -5,7 +5,7 @@ schema_version: '2'
 title: Block on a queued job until it reaches a terminal state
 epic: EP-02
 story: US-02-01
-status: blocked
+status: todo
 deps: []
 scope:
 - src/coqui_ai_api/app.py
@@ -64,7 +64,9 @@ Do **not** escalate on them.
       being reached. The bound must be injectable per call so no test sleeps for
       the production default.
 - [ ] `make verify` passes, with overall coverage at or above the 95% threshold
-      and no new `[[tool.mypy.overrides]]` entry for this project's own code.
+      and no new `[[tool.mypy.overrides]]` entry for this project's own code. The
+      `pip-audit` failure that blocked this task on 2026-09-06 is resolved; see
+      "Resolved escalation" below. Do not re-escalate on it.
 
 ## Constraints
 
@@ -90,3 +92,32 @@ Do **not** escalate on them.
   machinery. This helper reads job state; it does not schedule, cancel, or expire
   anything.
 - Authentication, which is EP-03 for the whole surface.
+
+## Resolved escalation: CVE-2026-9856 (2026-09-06)
+
+This task halted because `pip-audit` began reporting **CVE-2026-9856** against
+`transformers` 5.0.0, which was not on the then-closed two-entry ignore list. The
+escalation was correct and is now settled; nothing about it is left for you.
+
+What changed, all of it outside this task's scope and already applied to the tree:
+
+- The advisory is accepted as a third ignore, with its reachability argument, in
+  `DESIGN.md`, "The transformers pin, and three accepted advisories" → "The third
+  advisory: CVE-2026-9856". `Makefile`'s `audit` target carries the third
+  `--ignore-vuln`. `make audit` is green.
+- The pin's removal condition rose from `transformers >= 5.5.0` to `>= 5.10.0`,
+  updated in `DESIGN.md`, `CONTRIBUTING.md` and `KNOWN_ISSUES.md`.
+- `CONTRIBUTING.md`, "Additional rules for agents" now says what a task does when
+  the *next* new advisory lands: the ignore list stays closed to you, but an audit
+  failure you did not introduce, on a task whose scope excludes `pyproject.toml`,
+  `uv.lock` and the `Makefile`, is reported rather than halted on. Read that rule
+  before escalating on `make audit` again.
+
+**Do not** touch `pyproject.toml`, `uv.lock` or the `Makefile` from this task.
+They remain outside its scope.
+
+Implementation work from the halted session is present in the working tree,
+uncommitted: `src/coqui_ai_api/app.py` (the `wait_for_job` helper), the new
+`tests/test_wait_for_job.py`, and the `CONTRIBUTING.md` entries for
+`JOB_WAIT_TIMEOUT_SECONDS` and the blocking-facade design note. Review it against
+the acceptance criteria above and continue from it rather than starting over.

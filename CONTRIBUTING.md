@@ -161,13 +161,14 @@ it passes. Add a check by adding it to the Makefile, never to the workflow, so t
 two cannot drift.
 
 > [!NOTE]
-> `pip-audit` runs clean except for exactly two carried advisories,
-> **PYSEC-2026-2289** and **PYSEC-2026-2290**, passed to `--ignore-vuln` in the
-> `audit` target with their justification beside them. They are the fallout of the
-> `transformers==5.0.0` pin that `coqui-tts` 0.27.5 forces. This is the project's
-> only `pip-audit` ignore; the full reasoning and the condition for removing it
-> are in [DESIGN.md](DESIGN.md), "The transformers pin, and two accepted
-> advisories".
+> `pip-audit` runs clean except for exactly three carried advisories,
+> **PYSEC-2026-2289**, **PYSEC-2026-2290** and **CVE-2026-9856**, passed to
+> `--ignore-vuln` in the `audit` target with their justification beside them. They
+> are the fallout of the `transformers==5.0.0` pin that `coqui-tts` 0.27.5 forces.
+> This is the project's only `pip-audit` ignore; the full reasoning, the
+> reachability argument for each, and the condition for removing them
+> (`coqui-tts` allowing `transformers >= 5.10.0`) are in [DESIGN.md](DESIGN.md),
+> "The transformers pin, and three accepted advisories".
 
 `make verify` never rewrites files. Use `make format` for that.
 
@@ -332,13 +333,35 @@ and specific enough to be followed.
   The one legitimate way to run without authentication is the documented global
   switch, which is a deployment choice, not something a task should reach for to
   make a test pass.
-- **The `pip-audit` ignore list is closed.** The gate carries exactly two
-  ignores — PYSEC-2026-2289 and PYSEC-2026-2290 — justified and dated in
-  [DESIGN.md](DESIGN.md), "The transformers pin, and two accepted advisories". Do
-  not add a third to make a change pass, not even with a written justification. A
-  new advisory that blocks the gate is an escalation, the same as any other spec
-  gap. Removing the existing two once `coqui-tts` allows `transformers >= 5.5.0`
-  is expected and encouraged.
+- **The `pip-audit` ignore list is closed to you.** The gate's ignores —
+  PYSEC-2026-2289, PYSEC-2026-2290 and CVE-2026-9856 — are enumerated, justified
+  and dated in [DESIGN.md](DESIGN.md), "The transformers pin, and three accepted
+  advisories". Do not add one to make a change pass, not even with a written
+  justification, and do not edit the `audit` target, `pyproject.toml` or `uv.lock`
+  to move an advisory out of the way. Adding an ignore is a maintainer decision
+  reached by escalation. Removing the existing three once `coqui-tts` allows
+  `transformers >= 5.10.0` is expected and encouraged.
+
+  **A new advisory does not, by itself, block your task.** If `make verify` fails
+  *only* at the audit step, on an advisory you did not introduce, it is not your
+  task's failure and halting on it would stop the whole run over something no task
+  can fix. Treat it the way you treat a host-only check. Concretely, all four must
+  hold:
+
+  1. The audit step is the only failing step. Format, lint, types and tests are
+     green, at the normal coverage threshold and with no relaxations.
+  2. Your task's `scope` does not include `pyproject.toml`, `uv.lock` or the
+     `Makefile`, and you changed none of them.
+  3. The failure reproduces on the pre-existing tree. Verify it, do not assume it:
+     stash or otherwise set your changes aside, run `make audit`, and confirm the
+     same advisory appears. If it only appears with your changes applied, you
+     introduced it, and it *is* your task's failure.
+  4. You report it — the advisory id, the affected package and version, the fix
+     version, and the evidence from (3) — in the task result, plainly, as an
+     unresolved gate failure left for the maintainer.
+
+  Then finish the task and report it done. If any of the four does not hold,
+  escalate instead. Do not silence the advisory either way.
 - Follow the response-shape rule in [Code style & conventions](#code-style--conventions).
   The compatibility fields are frozen. Native shapes may evolve when recorded.
 - Prefer behavior-preserving refactors. When code must change to be testable, gate
@@ -408,6 +431,7 @@ models/           # mounted at /root/.local/share/tts in Docker
 | `SEED_OVERHEAD` | `3.0` | `RateEstimator`'s seed constant-overhead seconds, used before any jobs have completed. |
 | `SEED_PER_WORD` | `0.3` | `RateEstimator`'s seed seconds-per-word rate, used before any jobs have completed. |
 | `JOB_EXPIRATION_SECONDS` | `300` | Seconds after a job completes (or errors) before it and its WAV(s) are fully purged. `<= 0` disables expiration entirely. |
+| `JOB_WAIT_TIMEOUT_SECONDS` | `300` | Default bound for `wait_for_job`, the blocking-facade helper: how long a request thread waits on a queued job before giving up. Injectable per call so callers (and tests) can override it. |
 
 ### Key design: async job queue
 
@@ -456,6 +480,34 @@ already holding another. `_schedule_expiration` and `_expire_job` acquire
 `_handle_segment_complete` sets the outcome inside its `with long_form_lock`
 block and only calls `_schedule_expiration` after that block exits, for
 exactly this reason.
+
+**Blocking facade: `wait_for_job`.** `/generate` is fire-and-forget: it returns a
+job id and the client polls. The compatibility facade (`DESIGN.md`, "The
+compatibility endpoint is a blocking facade") cannot do that — it must return
+audio bytes from the same POST — so it needs a way to block a request thread on
+a job already moving through the same queue. `wait_for_job(job_id,
+timeout_seconds=JOB_WAIT_TIMEOUT_SECONDS)` is that mechanism: it polls the
+registry's `status` field (`_job_status`, one `jobs_lock` acquisition per poll,
+released before sleeping `_WAIT_POLL_SECONDS`) until the job is `"done"`
+(`WaitOutcome.SUCCEEDED`), `"error"` (`WaitOutcome.ERRORED`), absent — deleted or
+expired mid-wait — (`WaitOutcome.VANISHED`), or `timeout_seconds` elapses
+(`WaitOutcome.TIMED_OUT`). It only reads registry state; it never calls
+`_schedule_expiration`, `_cancel_expiration`, or `_expire_job` itself.
+
+That last point is the deliberate answer to what happens to a job whose waiter
+gives up, by timeout or by a client that has disconnected (this project's
+synchronous, one-worker-thread request handling has no way to detect a
+disconnected client independently of the timeout, so the two cases are handled
+identically: the bound is the only signal there is). The job is **not**
+cancelled. It keeps running to completion in the worker — there is nowhere else
+for it to go, since `_process_task`'s only cancellation path is registry
+removal, which is `DELETE /job/<id>`'s job, not a waiter's — and once it finishes
+(or errors) it is scheduled for expiration exactly as if a native `/generate`
+caller had stopped polling, purged after `JOB_EXPIRATION_SECONDS` like any other
+job. A synthesis that outlives its client therefore still occupies the one
+worker for the rest of its run; this is accepted as a direct consequence of
+"One model, one worker, one queue" (`DESIGN.md`) rather than something this
+helper works around.
 
 `estimator.py` provides `RateEstimator`, a standalone, thread-safe, dependency-free
 class that learns `duration ≈ overhead + per_word·words` from completed jobs'

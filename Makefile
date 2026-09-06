@@ -55,14 +55,24 @@ test:
 #   imported.
 # --ignore-vuln PYSEC-2026-2290: RCE loading LightGlue weights. This project
 #   only ever loads XTTS v2; LightGlue is never loaded.
-# Both are pinned by transformers==5.0.0, itself required so `from TTS.api
+# --ignore-vuln CVE-2026-9856: arbitrary file write by path traversal, via
+#   unvalidated chat_template keys used as filenames in save_pretrained() on
+#   PreTrainedTokenizerBase/ProcessorMixin. Needs both a save_pretrained() call
+#   (this project makes none, and the engine's only occurrence is commented out,
+#   in the tortoise layer XTTS never runs) and a transformers tokenizer or
+#   processor loaded from an untrusted repository (XTTS uses VoiceBpeTokenizer,
+#   which is neither). Added 2026-09-06 by maintainer decision.
+# All three are pinned by transformers==5.0.0, itself required so `from TTS.api
 # import TTS` can still find transformers.pytorch_utils.isin_mps_friendly. See
-# DESIGN.md, "The transformers pin, and two accepted advisories". This list is
-# closed: CONTRIBUTING.md, "Additional rules for agents".
+# DESIGN.md, "The transformers pin, and three accepted advisories"; the whole
+# list goes away once coqui-tts allows transformers >= 5.10.0. Adding to this
+# list is a maintainer decision reached by escalation, never a task's:
+# CONTRIBUTING.md, "Additional rules for agents".
 audit:
 	$(RUN) pip-audit \
 		--ignore-vuln PYSEC-2026-2289 \
-		--ignore-vuln PYSEC-2026-2290
+		--ignore-vuln PYSEC-2026-2290 \
+		--ignore-vuln CVE-2026-9856
 
 # The gate. Ordered cheapest-first so a fast failure comes back fast.
 verify: format-check lint typecheck test audit

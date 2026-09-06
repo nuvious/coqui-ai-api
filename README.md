@@ -216,3 +216,7 @@ What the project is meant to be, and what has been deliberately decided about it
 lives in **[DESIGN.md](DESIGN.md)**. Read that before proposing a change to the
 shape of the service. Its open questions and known deviations are the fastest way
 to tell a bug from a decision.
+
+Limitations worth knowing before you deploy this — including the three
+`transformers` advisories the engine pin carries and why they are accepted — are
+listed in **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)**.

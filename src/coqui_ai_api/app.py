@@ -1,3 +1,4 @@
+import enum
 import glob
 import itertools
 import os
@@ -33,6 +34,8 @@ CONFIG_FILE = os.getenv("CONFIG_FILE", "/workspace/config.yaml")
 MODEL_LOAD_TIME_ESTIMATE = float(os.getenv("MODEL_LOAD_TIME_ESTIMATE", "120"))
 # A value <= 0 disables job expiration entirely.
 JOB_EXPIRATION_SECONDS = float(os.getenv("JOB_EXPIRATION_SECONDS", "300"))
+# Default bound for ``wait_for_job``; see its docstring for the reasoning.
+JOB_WAIT_TIMEOUT_SECONDS = float(os.getenv("JOB_WAIT_TIMEOUT_SECONDS", "300"))
 
 # --- Worker / model readiness state -----------------------------------------
 # Populated by the worker thread and read by request threads (health checks,
@@ -556,6 +559,71 @@ def _job_registered(job_id: str) -> bool:
     """Whether ``job_id`` is currently present in the job registry."""
     with jobs_lock:
         return job_id in jobs
+
+
+class WaitOutcome(enum.Enum):
+    """Terminal result of :func:`wait_for_job`."""
+
+    SUCCEEDED = "succeeded"
+    ERRORED = "errored"
+    VANISHED = "vanished"
+    TIMED_OUT = "timed_out"
+
+
+# Polling interval for ``wait_for_job``. Deliberately short: a poll is a single
+# ``jobs_lock`` acquisition (see ``_job_status``), not a busy-wait.
+_WAIT_POLL_SECONDS = 0.02
+
+
+def _job_status(job_id: str) -> str | None:
+    """The registry ``status`` of ``job_id``, or ``None`` if it is not registered."""
+    with jobs_lock:
+        job = jobs.get(job_id)
+        return job["status"] if job is not None else None
+
+
+def wait_for_job(
+    job_id: str, timeout_seconds: float = JOB_WAIT_TIMEOUT_SECONDS
+) -> WaitOutcome:
+    """Block until ``job_id`` reaches a terminal state, or ``timeout_seconds`` elapses.
+
+    This is the mechanism that makes a route "blocking": callers register a job
+    exactly as ``post_generate`` does, put it on ``text_queue``, then call this to
+    wait for ``_process_task`` to finish it. It only reads registry state (via
+    ``_job_status``, a single ``jobs_lock`` acquisition per poll) and never
+    schedules, cancels, or expires anything, so it never holds two of the four
+    module locks at once.
+
+    Polls at ``_WAIT_POLL_SECONDS`` intervals rather than busy-waiting or adding
+    a per-job event, since no such event exists today and this helper must not
+    change ``_process_task``'s behaviour. ``timeout_seconds`` is accepted as a
+    parameter (defaulting to ``JOB_WAIT_TIMEOUT_SECONDS``) specifically so tests
+    can bound the wait tightly instead of sleeping for the production default.
+
+    Returns:
+        ``WaitOutcome.SUCCEEDED`` once the job's status is ``"done"``.
+        ``WaitOutcome.ERRORED`` once its status is ``"error"``.
+        ``WaitOutcome.VANISHED`` if it disappears from the registry mid-wait
+        (deleted or expired) or was never present.
+        ``WaitOutcome.TIMED_OUT`` if none of the above happens before the bound.
+
+    What happens to the job itself on ``TIMED_OUT`` (including a client that has
+    disconnected, which this project's synchronous request handling cannot
+    itself detect) is a deliberate decision, not an oversight: see
+    ``CONTRIBUTING.md``, "Key design: async job queue".
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        status = _job_status(job_id)
+        if status is None:
+            return WaitOutcome.VANISHED
+        if status == "done":
+            return WaitOutcome.SUCCEEDED
+        if status == "error":
+            return WaitOutcome.ERRORED
+        if time.monotonic() >= deadline:
+            return WaitOutcome.TIMED_OUT
+        time.sleep(_WAIT_POLL_SECONDS)
 
 
 def _process_task(tts, task: dict):

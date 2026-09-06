@@ -26,15 +26,22 @@ deviations" or "Open questions". This file is the short list.
   but nothing has re-run the scan against the shipped image yet. Descoped to
   maintainer-run future work; full reasoning in DESIGN.md, "Future work",
   "Measure and scan the migrated image".
-- **The engine pins `transformers==5.0.0`, which carries two accepted CVEs.**
+- **The engine pins `transformers==5.0.0`, which carries three accepted CVEs.**
   `coqui-tts` 0.27.5 cannot import on `transformers > 5.0.0` (it uses a symbol
   removed in 5.1.0), and no `transformers` release both imports and audits fully
-  clean. The project pins 5.0.0 and ignores exactly two advisories in `pip-audit`:
-  **PYSEC-2026-2289** (Trainer `torch.load` RCE; this project never trains) and
-  **PYSEC-2026-2290** (LightGlue loader RCE; this project never loads LightGlue).
-  Both are in code paths XTTS-v2 inference does not exercise. To be removed when
-  `coqui-tts` allows `transformers >= 5.5.0`. Full reasoning in DESIGN.md, "The
-  transformers pin, and two accepted advisories".
+  clean. The project pins 5.0.0 and ignores exactly three advisories in
+  `pip-audit`: **PYSEC-2026-2289** (Trainer `torch.load` RCE; this project never
+  trains), **PYSEC-2026-2290** (LightGlue loader RCE; this project never loads
+  LightGlue) and **CVE-2026-9856** (path traversal in `save_pretrained()`; this
+  project never calls it, and loads no `transformers` tokenizer or processor).
+  All three are in code paths XTTS-v2 inference does not exercise. To be removed
+  when `coqui-tts` allows `transformers >= 5.10.0`. Full reasoning in DESIGN.md,
+  "The transformers pin, and three accepted advisories".
+
+  CVE-2026-9856 was added on 2026-09-06, after the first two; the threshold for
+  dropping the ignores rose from 5.5.0 to 5.10.0 with it. Because that gap keeps
+  widening, DESIGN.md, "Future work" now carries a spike on escaping the pin
+  outright rather than waiting on a `coqui-tts` release.
 
 ## Testing
 
