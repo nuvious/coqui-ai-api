@@ -65,4 +65,13 @@ deviations" or "Open questions". This file is the short list.
   covers one historical deadlock by construction, not the general case. The
   blocking `POST /v1/audio/speech` facade now exists and holds a request thread
   for the whole synthesis; exercising it under the test suite surfaced no
-  lock-ordering violation, but that is not a load test.
+  lock-ordering violation, but that is not a load test, and it was only ever
+  exercised in-process, not under a real gunicorn server.
+- **The shipped gunicorn configuration's 30-second default timeout is lower
+  than `JOB_WAIT_TIMEOUT_SECONDS`'s 300-second default, and one sync worker
+  serves the whole API.** In the documented `docker-compose.yaml` deployment,
+  a synthesis over 30 seconds -- the ordinary case for XTTS v2 -- gets a
+  generic `500` instead of the documented `504`, restarts the worker, and
+  loses every other job's in-memory state; meanwhile no other route, including
+  `GET /health`, is served while a synthesis is in flight. Not fixed here;
+  full reasoning in DESIGN.md, "Known deviations".

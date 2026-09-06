@@ -597,7 +597,10 @@ between them only ever take one of `jobs_lock` (via `register_job` /
 `wait_for_job`'s internals) at a time and never call anything that takes a second
 lock while holding one. This is one more instance of the existing pattern holding
 under test, not a load test, and the open question about real concurrent load
-stands as it was.
+stands as it was. It was also only ever observed in-process, against the
+Flask test client, never under a real gunicorn server; see `DESIGN.md`,
+"Known deviations", for the deployment-level consequence of running this
+route under the shipped gunicorn configuration.
 
 Completed and errored jobs are purged automatically after `JOB_EXPIRATION_SECONDS`
 (default `300`; `<= 0` disables the mechanism entirely). `_schedule_expiration(job_id)`

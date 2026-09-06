@@ -718,6 +718,29 @@ Each needs a decision before anything acts on it.
   image's size, so `make smoke` stays off CI until that measurement happens.
   Descoped alongside the vulnerability-surface measurement above, on 2026-08-01;
   see [Future work](#future-work), "Measure and scan the migrated image".
+- **The shipped gunicorn configuration makes the compatibility facade's
+  documented `504` unreachable, and serialises the whole API behind one
+  synthesis.** [The compatibility endpoint is a blocking facade](#the-compatibility-endpoint-is-a-blocking-facade)
+  and `JOB_WAIT_TIMEOUT_SECONDS` (default `300` seconds) describe an app-level
+  timeout, but the `Dockerfile`'s `CMD` and `docker-compose.yaml` run that app
+  under gunicorn with no `--timeout`, `--workers`, or `--threads` set, so
+  gunicorn 23.0.0's own defaults apply: a 30-second worker timeout, one sync
+  worker, no threads. 30 seconds is below `JOB_WAIT_TIMEOUT_SECONDS` and below
+  what XTTS v2 needs for anything beyond a short sentence, so in the shipped
+  deployment gunicorn's arbiter kills the worker before the app's own `504`
+  path ever runs; the client instead gets a generic `500` HTML error page, and
+  the killed worker's replacement loses every other in-flight job's in-memory
+  state and has to reload the model. Independently of which timeout trips
+  first, one sync worker with no threads means this single-process API serves
+  no other route -- including `GET /health` -- for the duration of a
+  synthesis. This is recorded because it is true of the deployment path this
+  document and `README.md` otherwise describe as supported, not because it was
+  caused by this epic's work. Resolving it -- raising gunicorn's `--timeout`
+  and adding `--threads` (or `--workers`) via the container command, or
+  lowering `JOB_WAIT_TIMEOUT_SECONDS`'s default to sit under whatever bound is
+  chosen -- is a maintainer decision that has not been taken; this entry
+  records the gap, it does not choose between those options. Found and
+  verified live 2026-09-06, in `T-02-02-03` review.
 
 ## Open questions
 

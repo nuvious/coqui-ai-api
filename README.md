@@ -277,12 +277,53 @@ documented limitation of this deployment, not a bug to retry past.
 ##### Blocking, timeouts, and long input
 
 This endpoint holds the connection open for the full length of synthesis --
-there is no polling. The bound is `JOB_WAIT_TIMEOUT_SECONDS` (default `300`
-seconds); a request still running when that elapses gets a `504` rather than
-hanging indefinitely, and the job itself keeps running to completion rather
-than being cancelled. If holding a connection open for that long is not
+there is no polling. If holding a connection open for that long is not
 acceptable, use `POST /generate` plus `GET /job/<id>` (or
 `GET /job/<id>/progress`) instead, as in the walkthrough above.
+
+**The effective ceiling for the shipped deployment is 30 seconds, not
+`JOB_WAIT_TIMEOUT_SECONDS`.** The app itself waits up to
+`JOB_WAIT_TIMEOUT_SECONDS` (default `300` seconds) and, if that elapses first,
+returns a documented `504` with an `ErrorResponseModel` body. But the
+documented `docker-compose.yaml` deployment runs the app under gunicorn with
+no `--timeout` set, so gunicorn's own default of 30 seconds applies in front
+of it, and 30 seconds is well under what XTTS v2 needs for anything beyond a
+short sentence. Whichever bound is lower is the one a client actually hits, so
+`JOB_WAIT_TIMEOUT_SECONDS` only has effect if it is set below gunicorn's
+`--timeout`.
+
+When gunicorn's timeout trips first, the response is not the `504` above --
+it's a `500` with a generic `text/html` "Internal Server Error" page, because
+the arbiter has killed the worker process rather than the app returning
+anything:
+
+```bash
+curl -D - -X POST http://localhost:5000/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model": "tts-1", "input": "<something that takes more than 30 seconds to synthesize>", "voice": "rick"}'
+```
+
+```
+HTTP/1.1 500 INTERNAL SERVER ERROR
+Content-Type: text/html; charset=utf-8
+```
+
+Losing the worker process this way also discards every other job's in-memory
+state -- all job state is in memory and does not survive any restart, and
+this is one -- and it forces the multi-gigabyte XTTS model to reload before
+the replacement worker can serve anything.
+
+Separately, and regardless of which timeout trips: the shipped configuration
+runs gunicorn with its own default of one sync worker and no threads, so this
+endpoint occupies that single worker for the entire synthesis. No other
+route -- including `GET /health` -- is served while a compatibility request is
+in flight.
+
+A deployer whose synthesis regularly exceeds 30 seconds -- the ordinary case
+for XTTS v2, not an edge case -- needs to raise gunicorn's own `--timeout` (and
+should consider `--threads`, so `/health` and other routes are not stalled
+too) via the container's command, before `JOB_WAIT_TIMEOUT_SECONDS` has any
+effect.
 
 `input` longer than 4096 characters -- upstream's own hard cap on this field --
 is rejected the same way, before anything is enqueued:
