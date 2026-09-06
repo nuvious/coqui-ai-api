@@ -179,6 +179,161 @@ curl -X POST http://localhost:5000/generate/long-form \
 This returns a `job_id`; poll `/job/<id>/progress` until `status` is `done`, then
 download it from `/job/<id>`.
 
+#### OpenAI-compatible endpoint
+
+`POST /v1/audio/speech` serves OpenAI's own `/v1/audio/speech` dialect, so an
+off-the-shelf client already built against that API (for example,
+[Hermes' `base_url` override](https://hermes-agent.nousresearch.com/docs/user-guide/features/tts/))
+works against this service unmodified. Unlike `/generate`, it returns no job
+id: the request blocks until synthesis finishes and the response body is the
+audio itself.
+
+```bash
+curl -D - -X POST http://localhost:5000/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model": "tts-1", "input": "This is a test.", "voice": "rick"}' \
+  -o speech.mp3
+```
+
+```
+HTTP/1.1 200 OK
+Content-Type: audio/mpeg
+Content-Length: ...
+```
+
+`-D -` prints the response headers shown above; `-o speech.mp3` writes the
+audio bytes -- the actual response body -- to that file instead of dumping
+binary to the terminal.
+
+##### The `voice` field
+
+`voice` names one of this deployment's own samples: the same basenames
+`GET /voices` publishes, and nothing else. Given `GET /voices` lists `rick.wav`
+(from [voice cloning with a specific sample](#voice-cloning-with-a-specific-sample)
+above), both `"voice": "rick"` and `"voice": "rick.wav"` select it -- the
+`.wav` suffix is optional. A name `GET /voices` does not publish, including one
+of OpenAI's own stock voice names (`alloy`, `nova`, `shimmer`, ...), is
+rejected rather than falling back to the default sample:
+
+```json
+{"message": "Unknown voice. See GET /voices for available voices."}
+```
+
+with `400`, and nothing is enqueued.
+
+There is no built-in table mapping those stock names onto a sample. A deployer
+whose client hardcodes one needs no code and no configuration for it: drop
+`workspace/alloy.wav` -- a copy of an existing sample, or a symlink to one --
+and `GET /voices` publishes it like any other sample, after which
+`voice: "alloy"` resolves to it. This is deliberate, in preference to a
+built-in alias table, so that the deployer decides which of their own clones a
+stock name means, not this project.
+
+##### The `response_format` field
+
+| `response_format` | Served? | `Content-Type` |
+|---|---|---|
+| `mp3` (the default) | yes | `audio/mpeg` |
+| `opus` | yes | `audio/ogg` |
+| `flac` | yes | `audio/flac` |
+| `wav` | yes | `audio/wav` |
+| `pcm` | yes | `audio/pcm` |
+| `aac` | no | -- |
+
+Omitting `response_format` serves `mp3`, matching upstream's own default, so a
+client that never sets it gets what it would have gotten from OpenAI. `aac` is
+the one value this deployment cannot produce, and returns:
+
+```json
+{"message": "Unsupported response_format 'aac'. Supported values: mp3, opus, flac, wav, pcm."}
+```
+
+with `400`, rather than silently sending back a different format's bytes.
+`pcm` is the one exception to "every format is self-describing": it is raw,
+headerless 16-bit signed little-endian samples at the model's native sample
+rate (24 kHz mono for the shipped XTTS v2 configuration), so a client that
+requests it needs to already know that rate.
+
+##### The `speed` field
+
+This deployment has no playback-speed control, so `speed` accepts only its
+own default, `1.0`. Omitting it, or sending `1.0` explicitly, works; any other
+value is rejected before anything is enqueued:
+
+```bash
+curl -X POST http://localhost:5000/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model": "tts-1", "input": "This is a test.", "voice": "rick", "speed": 1.25}'
+```
+
+```json
+{"message": "Unsupported speed 1.25. This deployment cannot change playback speed; omit `speed` or set it to 1.0."}
+```
+
+with `400`. A client that sets `speed` to anything but `1.0` should treat
+this the same way it would treat an unsupported `response_format`: a
+documented limitation of this deployment, not a bug to retry past.
+
+##### Blocking, timeouts, and long input
+
+This endpoint holds the connection open for the full length of synthesis --
+there is no polling. If holding a connection open for that long is not
+acceptable, use `POST /generate` plus `GET /job/<id>` (or
+`GET /job/<id>/progress`) instead, as in the walkthrough above.
+
+**The effective ceiling for the shipped deployment is 30 seconds, not
+`JOB_WAIT_TIMEOUT_SECONDS`.** The app itself waits up to
+`JOB_WAIT_TIMEOUT_SECONDS` (default `300` seconds) and, if that elapses first,
+returns a documented `504` with an `ErrorResponseModel` body. But the
+documented `docker-compose.yaml` deployment runs the app under gunicorn with
+no `--timeout` set, so gunicorn's own default of 30 seconds applies in front
+of it, and 30 seconds is well under what XTTS v2 needs for anything beyond a
+short sentence. Whichever bound is lower is the one a client actually hits, so
+`JOB_WAIT_TIMEOUT_SECONDS` only has effect if it is set below gunicorn's
+`--timeout`.
+
+When gunicorn's timeout trips first, the response is not the `504` above --
+it's a `500` with a generic `text/html` "Internal Server Error" page, because
+the arbiter has killed the worker process rather than the app returning
+anything:
+
+```bash
+curl -D - -X POST http://localhost:5000/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model": "tts-1", "input": "<something that takes more than 30 seconds to synthesize>", "voice": "rick"}'
+```
+
+```
+HTTP/1.1 500 INTERNAL SERVER ERROR
+Content-Type: text/html; charset=utf-8
+```
+
+Losing the worker process this way also discards every other job's in-memory
+state -- all job state is in memory and does not survive any restart, and
+this is one -- and it forces the multi-gigabyte XTTS model to reload before
+the replacement worker can serve anything.
+
+Separately, and regardless of which timeout trips: the shipped configuration
+runs gunicorn with its own default of one sync worker and no threads, so this
+endpoint occupies that single worker for the entire synthesis. No other
+route -- including `GET /health` -- is served while a compatibility request is
+in flight.
+
+A deployer whose synthesis regularly exceeds 30 seconds -- the ordinary case
+for XTTS v2, not an edge case -- needs to raise gunicorn's own `--timeout` (and
+should consider `--threads`, so `/health` and other routes are not stalled
+too) via the container's command, before `JOB_WAIT_TIMEOUT_SECONDS` has any
+effect.
+
+`input` longer than 4096 characters -- upstream's own hard cap on this field --
+is rejected the same way, before anything is enqueued:
+
+```json
+{"message": "input exceeds 4096 characters. Use POST /generate/long-form for longer text."}
+```
+
+with `400`; use [long-form generation](#long-form-generation) for text that size.
+
 #### Job expiration
 
 Finished and errored jobs are cleaned up automatically `JOB_EXPIRATION_SECONDS`
@@ -216,3 +371,7 @@ What the project is meant to be, and what has been deliberately decided about it
 lives in **[DESIGN.md](DESIGN.md)**. Read that before proposing a change to the
 shape of the service. Its open questions and known deviations are the fastest way
 to tell a bug from a decision.
+
+Limitations worth knowing before you deploy this — including the three
+`transformers` advisories the engine pin carries and why they are accepted — are
+listed in **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)**.

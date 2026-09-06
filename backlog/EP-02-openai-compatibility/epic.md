@@ -6,8 +6,8 @@ title: Serve the OpenAI-compatible speech endpoint
 branch: feat/EP-02-openai-compatibility
 depends_on:
 - EP-01
-planning: pending
-review: pending
+planning: done
+review: passed
 ---
 
 ## Goal
@@ -51,11 +51,14 @@ the same worker queue, and the native endpoints stay the primary surface.
   The endpoint enqueues onto the existing worker and waits. It must not get its
   own model instance, its own thread, or a path around the queue. The one model,
   one worker decision is what keeps VRAM predictable.
-- Two open questions in `DESIGN.md` sit inside this epic: how `voice` maps onto
+- Two open questions in `DESIGN.md` sat inside this epic: how `voice` maps onto
   named WAV samples, and what `response_format` does when the worker only
-  produces WAV. Neither is decided. Escalate rather than choosing, particularly
-  on `response_format`, because answering it may mean adding ffmpeg as a
-  dependency, which is not a decision a task should make.
+  produces WAV. **Both were escalated and both were decided on 2026-09-06**, and
+  both are now recorded in `DESIGN.md` under "How `voice` resolves onto a named
+  sample" and "What `response_format` serves, and what it rejects". Implement
+  what is written there; do not re-derive or re-open either. Neither answer adds
+  a dependency: `response_format` is served by `soundfile`, which is already
+  installed, and the `Dockerfile` is untouched.
 - A blocking endpoint holds a request thread for the whole synthesis. `DESIGN.md`
   lists worker concurrency under real load as an open question, and this epic
   makes it more pressing. Note what you observe; do not redesign the locking.

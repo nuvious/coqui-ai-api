@@ -161,13 +161,14 @@ it passes. Add a check by adding it to the Makefile, never to the workflow, so t
 two cannot drift.
 
 > [!NOTE]
-> `pip-audit` runs clean except for exactly two carried advisories,
-> **PYSEC-2026-2289** and **PYSEC-2026-2290**, passed to `--ignore-vuln` in the
-> `audit` target with their justification beside them. They are the fallout of the
-> `transformers==5.0.0` pin that `coqui-tts` 0.27.5 forces. This is the project's
-> only `pip-audit` ignore; the full reasoning and the condition for removing it
-> are in [DESIGN.md](DESIGN.md), "The transformers pin, and two accepted
-> advisories".
+> `pip-audit` runs clean except for exactly three carried advisories,
+> **PYSEC-2026-2289**, **PYSEC-2026-2290** and **CVE-2026-9856**, passed to
+> `--ignore-vuln` in the `audit` target with their justification beside them. They
+> are the fallout of the `transformers==5.0.0` pin that `coqui-tts` 0.27.5 forces.
+> This is the project's only `pip-audit` ignore; the full reasoning, the
+> reachability argument for each, and the condition for removing them
+> (`coqui-tts` allowing `transformers >= 5.10.0`) are in [DESIGN.md](DESIGN.md),
+> "The transformers pin, and three accepted advisories".
 
 `make verify` never rewrites files. Use `make format` for that.
 
@@ -250,6 +251,25 @@ The conventions the tools cannot check, and which matter more:
   Native endpoint shapes may evolve when the change is recorded in the API surface
   table below and in `CHANGELOG.md`. Additive changes are always allowed. See
   [DESIGN.md](DESIGN.md) for why this is looser than it used to be.
+- **`/v1/audio/speech` serves five of the six upstream `response_format`
+  values.** `mp3`, `opus`, `flac`, `wav` and `pcm` are served; `aac` returns a
+  `400` naming the other five. **When the field is absent the default is `mp3`**,
+  matching upstream, so a client that omits it gets what OpenAI would have sent.
+  The supported set, the encoder settings and the per-format `Content-Type` live
+  in one mapping in `app.py`, not restated at each use. The rule and its reasoning
+  are [DESIGN.md](DESIGN.md), "What `response_format` serves, and what it rejects";
+  state it, do not re-derive it.
+- **`soundfile` is used but not declared, on purpose. Do not "fix" it.** The
+  compressed `response_format` values are encoded through `soundfile`
+  (libsndfile), which reaches the environment as a transitive dependency of
+  `coqui-tts` and `librosa` and is present in both the dev container and the
+  shipped image. Adding it to `[project.dependencies]` needs `uv lock` to re-run,
+  and that needs network access this sandbox does not have — `uv lock --offline`
+  cannot resolve this project's graph from cache. It is recorded as maintainer
+  host-only work in [DESIGN.md](DESIGN.md), "Future work". An agent that edits
+  `pyproject.toml` or `uv.lock` to declare it will fail the gate, not fix
+  anything. The test that asserts the `MP3`, `OGG` and `FLAC` encoders are
+  available is what covers the risk in the meantime; do not delete it.
 - **The version lives in `pyproject.toml` and nowhere else.** Read it from
   `coqui_ai_api.__version__`, which comes from installed package metadata.
   `tests/test_version.py` enforces this.
@@ -332,13 +352,35 @@ and specific enough to be followed.
   The one legitimate way to run without authentication is the documented global
   switch, which is a deployment choice, not something a task should reach for to
   make a test pass.
-- **The `pip-audit` ignore list is closed.** The gate carries exactly two
-  ignores — PYSEC-2026-2289 and PYSEC-2026-2290 — justified and dated in
-  [DESIGN.md](DESIGN.md), "The transformers pin, and two accepted advisories". Do
-  not add a third to make a change pass, not even with a written justification. A
-  new advisory that blocks the gate is an escalation, the same as any other spec
-  gap. Removing the existing two once `coqui-tts` allows `transformers >= 5.5.0`
-  is expected and encouraged.
+- **The `pip-audit` ignore list is closed to you.** The gate's ignores —
+  PYSEC-2026-2289, PYSEC-2026-2290 and CVE-2026-9856 — are enumerated, justified
+  and dated in [DESIGN.md](DESIGN.md), "The transformers pin, and three accepted
+  advisories". Do not add one to make a change pass, not even with a written
+  justification, and do not edit the `audit` target, `pyproject.toml` or `uv.lock`
+  to move an advisory out of the way. Adding an ignore is a maintainer decision
+  reached by escalation. Removing the existing three once `coqui-tts` allows
+  `transformers >= 5.10.0` is expected and encouraged.
+
+  **A new advisory does not, by itself, block your task.** If `make verify` fails
+  *only* at the audit step, on an advisory you did not introduce, it is not your
+  task's failure and halting on it would stop the whole run over something no task
+  can fix. Treat it the way you treat a host-only check. Concretely, all four must
+  hold:
+
+  1. The audit step is the only failing step. Format, lint, types and tests are
+     green, at the normal coverage threshold and with no relaxations.
+  2. Your task's `scope` does not include `pyproject.toml`, `uv.lock` or the
+     `Makefile`, and you changed none of them.
+  3. The failure reproduces on the pre-existing tree. Verify it, do not assume it:
+     stash or otherwise set your changes aside, run `make audit`, and confirm the
+     same advisory appears. If it only appears with your changes applied, you
+     introduced it, and it *is* your task's failure.
+  4. You report it — the advisory id, the affected package and version, the fix
+     version, and the evidence from (3) — in the task result, plainly, as an
+     unresolved gate failure left for the maintainer.
+
+  Then finish the task and report it done. If any of the four does not hold,
+  escalate instead. Do not silence the advisory either way.
 - Follow the response-shape rule in [Code style & conventions](#code-style--conventions).
   The compatibility fields are frozen. Native shapes may evolve when recorded.
 - Prefer behavior-preserving refactors. When code must change to be testable, gate
@@ -408,6 +450,7 @@ models/           # mounted at /root/.local/share/tts in Docker
 | `SEED_OVERHEAD` | `3.0` | `RateEstimator`'s seed constant-overhead seconds, used before any jobs have completed. |
 | `SEED_PER_WORD` | `0.3` | `RateEstimator`'s seed seconds-per-word rate, used before any jobs have completed. |
 | `JOB_EXPIRATION_SECONDS` | `300` | Seconds after a job completes (or errors) before it and its WAV(s) are fully purged. `<= 0` disables expiration entirely. |
+| `JOB_WAIT_TIMEOUT_SECONDS` | `300` | Default bound for `wait_for_job`, the blocking-facade helper: how long a request thread waits on a queued job before giving up. Injectable per call so callers (and tests) can override it. |
 
 ### Key design: async job queue
 
@@ -457,6 +500,34 @@ already holding another. `_schedule_expiration` and `_expire_job` acquire
 block and only calls `_schedule_expiration` after that block exits, for
 exactly this reason.
 
+**Blocking facade: `wait_for_job`.** `/generate` is fire-and-forget: it returns a
+job id and the client polls. The compatibility facade (`DESIGN.md`, "The
+compatibility endpoint is a blocking facade") cannot do that — it must return
+audio bytes from the same POST — so it needs a way to block a request thread on
+a job already moving through the same queue. `wait_for_job(job_id,
+timeout_seconds=JOB_WAIT_TIMEOUT_SECONDS)` is that mechanism: it polls the
+registry's `status` field (`_job_status`, one `jobs_lock` acquisition per poll,
+released before sleeping `_WAIT_POLL_SECONDS`) until the job is `"done"`
+(`WaitOutcome.SUCCEEDED`), `"error"` (`WaitOutcome.ERRORED`), absent — deleted or
+expired mid-wait — (`WaitOutcome.VANISHED`), or `timeout_seconds` elapses
+(`WaitOutcome.TIMED_OUT`). It only reads registry state; it never calls
+`_schedule_expiration`, `_cancel_expiration`, or `_expire_job` itself.
+
+That last point is the deliberate answer to what happens to a job whose waiter
+gives up, by timeout or by a client that has disconnected (this project's
+synchronous, one-worker-thread request handling has no way to detect a
+disconnected client independently of the timeout, so the two cases are handled
+identically: the bound is the only signal there is). The job is **not**
+cancelled. It keeps running to completion in the worker — there is nowhere else
+for it to go, since `_process_task`'s only cancellation path is registry
+removal, which is `DELETE /job/<id>`'s job, not a waiter's — and once it finishes
+(or errors) it is scheduled for expiration exactly as if a native `/generate`
+caller had stopped polling, purged after `JOB_EXPIRATION_SECONDS` like any other
+job. A synthesis that outlives its client therefore still occupies the one
+worker for the rest of its run; this is accepted as a direct consequence of
+"One model, one worker, one queue" (`DESIGN.md`) rather than something this
+helper works around.
+
 `estimator.py` provides `RateEstimator`, a standalone, thread-safe, dependency-free
 class that learns `duration ≈ overhead + per_word·words` from completed jobs'
 `record(words, duration)` calls and answers `predict(words)`. With zero samples it
@@ -473,7 +544,63 @@ call `estimator.predict(words)` to build the `/job/<id>/progress` ETA fields
 Named `.wav` files in the workspace that are not UUID-named (i.e. not job outputs)
 are treated as available voice samples and listed by `GET /voices`. The generation
 endpoints accept an optional `speaker_wav` field (basename) to override the default
-voice.
+voice; an unknown basename there falls back to `SPEAKER_WAV` silently, which is the
+native contract and does not change.
+
+**The compatibility endpoint's `voice` field resolves against the same set, and is
+deliberately stricter.** One resolver turns a `voice` value into a speaker WAV path
+or a rejection. It reads its candidates from `_list_speaker_wavs()` — never from a
+second glob of `OUTPUT_DIR`, so the resolver and `GET /voices` cannot drift apart —
+accepts a published basename with or without its `.wav` suffix (`rick` and
+`rick.wav` both select `rick.wav`), and rejects everything else with `400` and a
+message naming `GET /voices`: an unknown name, an empty string, a name carrying a
+directory component, an absolute path. It never falls back to `SPEAKER_WAV`, and a
+rejected request enqueues nothing. The rule and the reasoning behind it are in
+`DESIGN.md`, "How `voice` resolves onto a named sample"; the asymmetry between the
+two endpoints is intentional, so do not "fix" either one to match the other.
+
+**`POST /v1/audio/speech` is the route that wires the pieces above together.**
+`post_speech` validates `input` (empty is rejected exactly like `post_generate`'s
+"Missing or empty text.", and over 4096 characters is rejected naming
+`/generate/long-form`, mirroring upstream's own cap), resolves `voice` via the
+resolver above, checks `response_format` against `_RESPONSE_FORMATS`, and checks
+`speed`, all before touching the queue — a rejection at any of these steps enqueues
+nothing. Once validation passes it calls `register_job` and puts a task on
+`text_queue` in the same shape `post_generate` uses, then calls
+`wait_for_job(job_id, timeout_seconds=JOB_WAIT_TIMEOUT_SECONDS)` and blocks. There
+is no second model instance, no new thread, and no path around the queue. On
+`WaitOutcome.SUCCEEDED` it calls `_encode_speech_audio` on the finished WAV and
+returns the encoded bytes with the matching `Content-Type`. Every other outcome
+gets a documented status and an `ErrorResponseModel` body rather than an empty or
+truncated `200`: `WaitOutcome.ERRORED` and `WaitOutcome.VANISHED` (the job was
+deleted or expired mid-wait — an internal race the compatibility client has no way
+to have caused) both return `500`; `WaitOutcome.TIMED_OUT` returns `504`, since at
+that point the service has behaved like a gateway that gave up waiting on its own
+backend. `_speech_response_for_outcome` holds this mapping in one place. In every
+non-success case the job itself is left exactly as `wait_for_job` left it: the
+route never calls `_expire_job`, `_cancel_expiration`, or `_schedule_expiration`,
+and never deletes the WAV itself, so cleanup stays the existing expiration
+machinery's job like any other job (`_process_task` already calls
+`_schedule_expiration` once the job reaches `done`/`error`, independently of
+whether a compatibility caller is still waiting).
+
+**`speed` accepts exactly `1.0` (the default) and rejects everything else with a
+`400`.** `_validate_speech_speed` is the implementation; the product decision and
+why it is a full rejection rather than a partial one lives in `DESIGN.md`, "Why
+`speed` accepts only `1.0`" — state it there, do not re-derive it here.
+
+**Observed concurrency note (`DESIGN.md`, "Open questions"):** exercising this
+route in the test suite (many single-threaded requests, plus the dedicated
+multi-threaded `wait_for_job` lock-discipline test) surfaced no violation of the
+four-lock rule and no deadlock; `post_speech` and `_speech_response_for_outcome`
+between them only ever take one of `jobs_lock` (via `register_job` /
+`wait_for_job`'s internals) at a time and never call anything that takes a second
+lock while holding one. This is one more instance of the existing pattern holding
+under test, not a load test, and the open question about real concurrent load
+stands as it was. It was also only ever observed in-process, against the
+Flask test client, never under a real gunicorn server; see `DESIGN.md`,
+"Known deviations", for the deployment-level consequence of running this
+route under the shipped gunicorn configuration.
 
 Completed and errored jobs are purged automatically after `JOB_EXPIRATION_SECONDS`
 (default `300`; `<= 0` disables the mechanism entirely). `_schedule_expiration(job_id)`
@@ -513,6 +640,7 @@ never started); `is_worker_alive()` checks it and backs the `/ready` endpoint.
 |--------|------|---------|
 | POST | `/generate` | Enqueue a TTS job; returns `201 {"job_id": "<uuid>"}` |
 | POST | `/generate/long-form` | Enqueue a long-form job from an uploaded text file; returns `201 {"job_id": "<uuid>"}` |
+| POST | `/v1/audio/speech` | OpenAI-compatible synchronous TTS; serves `response_format` values `mp3` (default), `opus`, `flac`, `wav`, `pcm`, and rejects `aac` with a `400` |
 | GET | `/job/<id>` | Download the generated WAV (404 while still processing) |
 | GET | `/job/<id>/progress` | Job progress (`total`/`completed`/`status`, plus `position`/`queue_seconds`/`generation_seconds`/`total_seconds`/`expires_at` ETA fields) |
 | DELETE | `/job/<id>` | Delete a job's WAV and purge its registry/long-form/expiration-timer state |
