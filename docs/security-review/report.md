@@ -581,3 +581,325 @@ validation, a UUID check, or a test under `tests/` — the follow-on epic
 decides the fix, and this task reports today's behaviour rather than pinning
 it. `DESIGN.md` and `KNOWN_ISSUES.md` are not edited here; `US-03-02` owns
 that, including deciding what to do with F-03 through F-07 above.
+
+## The long-form upload path, and the absence of request limits
+
+`T-03-01-01`'s enumeration named `POST /generate/long-form` as one of the two
+input paths this story asks to be assessed specifically (the other,
+`speaker_wav`, is `T-03-01-02`'s, above). This section is the other half:
+what a request controls once the file itself, rather than the filename, is
+the input.
+
+Every measurement below was produced by running the app under
+`COQUI_AI_API_START_WORKER=0` against a throwaway `OUTPUT_DIR`, using the
+Flask test client — the same harness `T-03-01-02` used — with one deliberate
+difference: `app.testing` is left `False`. Setting it `True` (as the
+`client` pytest fixture does) makes Flask's `PROPAGATE_EXCEPTIONS` default to
+true and the test client re-raises an unhandled exception instead of
+returning the response a real deployment's client gets; this section wants
+what an actual caller sees, so the probe builds its own `test_client()` off
+`coqui_ai_api.app.app` without that flag. The probe script lived at
+`/tmp/t030103_probe.py`, outside the repository, and was deleted once its
+output below was captured; `git status` shows no changes from writing this
+section.
+
+### Tracing a request: `form.file` → `_split_sentences` → `text_queue` → the worker's writes
+
+Code path (`src/coqui_ai_api/app.py:1091-1140`):
+
+```python
+def post_generate_long_form(form: LongFormGenerationForm) -> Response:
+    text = form.file.read().decode("utf-8")          # 1097: whole file, in memory
+    sentences = _split_sentences(text)                # 1098
+    if not sentences:
+        return make_response(jsonify({"message": "No sentences found in file."}), 400)
+    ...
+    parent_job_id = str(uuid.uuid4())
+    register_job(parent_job_id, kind="long_form_parent", ...)   # 1110-1112
+
+    segment_ids = []
+    for sentence, word_count in zip(sentences, segment_word_counts):   # 1115
+        seg_id = str(uuid.uuid4())
+        register_job(seg_id, kind="segment", ..., parent_job_id=parent_job_id)  # 1118-1120
+        text_queue.put({...})                          # 1121-1130: one put per sentence
+    ...
+    long_form_jobs[parent_job_id] = {"total": len(sentences), "completed": 0,
+                                      "status": "processing", "segments": segment_ids}
+    return make_response(jsonify({"job_id": parent_job_id}), 201)
+```
+
+`form.file` is a `werkzeug.datastructures.FileStorage`; `.read()` pulls the
+entire upload into a Python `bytes` object with no size argument and no
+streaming, `.decode("utf-8")` materialises a second full copy as `str`, and
+`_split_sentences` (`app.py:116-119`) does a third full-text regex split.
+None of the three steps checks a length first. Every sentence the split
+produces becomes one `register_job(..., kind="segment", ...)` call (one
+`OrderedDict` entry in `jobs`) and one `text_queue.put(...)` (one entry
+in a `queue.Queue()` constructed with no `maxsize`, `app.py:395`, so `put`
+never blocks regardless of depth). The parent gets one more registry entry
+(`kind="long_form_parent"`). Nothing bounds how many sentences one upload
+produces, and the loop that enqueues them has no early exit.
+
+The worker (`_process_task`, `app.py:842-902`) takes each queued segment in
+turn — one at a time, `tts_worker`'s single `while True: task =
+text_queue.get()` loop, per `DESIGN.md`, "One model, one worker, one queue" —
+and calls `tts.tts_to_file(text=..., file_path=task["output_path"], ...)`,
+writing `<OUTPUT_DIR>/<seg_id>.wav` (`_get_filename`, `app.py:674-675`) for
+every segment. `_handle_segment_complete` (`app.py:629-671`) is notified
+after each segment; once every segment for a parent has reached `"done"`, it
+concatenates all `N` segment WAVs into `<OUTPUT_DIR>/<parent_id>.wav`
+(`_concatenate_wavs`, `app.py:122-128`, itself unbounded — it opens and
+streams every input file's frames into the output with no size check) and
+then removes the `N` segment files in a `finally` block. If any segment
+instead reaches `"error"`, that cleanup loop is skipped entirely — any
+segment WAVs already written by other, successfully-completed segments of
+the same upload are left on disk (see [Disk growth](#disk-growth), below).
+
+### `app.config["MAX_CONTENT_LENGTH"]`, read from the running app
+
+```
+$ COQUI_AI_API_START_WORKER=0 CONFIG_FILE=workspace/config.yaml OUTPUT_DIR=workspace \
+  uv run python -c "from coqui_ai_api.app import app; \
+  print(app.config['MAX_CONTENT_LENGTH'], app.config['MAX_FORM_MEMORY_SIZE'], app.config['MAX_FORM_PARTS'])"
+None 500000 1000
+```
+
+`MAX_CONTENT_LENGTH` is `None` — nothing in `app.py` or `config.yaml` sets
+it, and Flask's own default is `None`. Concretely, that means Werkzeug
+imposes **no ceiling on the size of a request body this process will
+accept and buffer**: for a multipart upload, a file part is spooled (to
+memory then, past a threshold, to a temp file on disk) with no limit other
+than available memory/disk, all *before* `post_generate_long_form` gets a
+chance to run, and `form.file.read()` then pulls that entire spooled file
+into process memory a second time as a single `bytes` object. The two
+sibling limits Werkzeug 3.1 ships (`MAX_FORM_MEMORY_SIZE`, 500 kB — the
+threshold for a *non-file* form field held in memory rather than spooled;
+`MAX_FORM_PARTS`, 1000 — the count of multipart parts/fields in one
+request) exist and are non-`None` by Werkzeug's own default, but neither
+caps the size of the uploaded file itself: `MAX_FORM_MEMORY_SIZE` governs
+ordinary fields (`speaker_wav` here), and a single `file` part is one part
+regardless of how large its content is, so `MAX_FORM_PARTS` does not limit
+it either. `MAX_CONTENT_LENGTH` is the only setting that would, and it is
+unset.
+
+### Non-UTF-8, empty, and no-terminator uploads, exercised
+
+```python
+resp = client.post("/generate/long-form",
+                    data={"file": (io.BytesIO(<bytes>), "name.txt")},
+                    content_type="multipart/form-data")
+```
+
+| Upload | Status | Response body |
+|---|---|---|
+| `b"\xff\xfe not valid utf-8 \x80\x81"` (non-UTF-8) | **500** | Flask's generic HTML error page: `<!doctype html>...<h1>Internal Server Error</h1><p>The server encountered an internal error...</p>` — no filename, no traceback, no exception text. The `UnicodeDecodeError` and its full traceback (naming `app.py:1097`, the exact line) go to the **server's own log** (`app.logger`/stderr) only, never the response. Log content itself is `T-03-01-04`'s scope; recorded here only as "what the client gets" per this task's acceptance criterion. |
+| `b""` (empty file) | 400 | `{"message": "No sentences found in file."}` — `_split_sentences("")` returns `[]`; no internal detail. |
+| `b"this file has words and spaces but nothing that ends a sentence at all"` (no `.`/`!`/`?`, no blank line) | **201** | `{"job_id": "<uuid>"}` — `_split_sentences` treats the entire 70-byte file as **one sentence** (its regex splits on `[.!?]\s+` or a blank line; matching neither, `re.split` returns the whole stripped string unchanged), so one segment is enqueued whose `text` is the complete file content. There is no upper bound on how long that one "sentence" — and therefore one `tts.tts_to_file` call — can be; see [Disk growth](#disk-growth) and F-09 below for what that means for the worker. |
+
+No case discloses an internal path, a stack frame, or any detail beyond the
+generic message the code itself already returns for the 400s; the 500 is
+Flask's own default page, produced because nothing in `app.py` catches
+`UnicodeDecodeError`.
+
+### Job amplification, measured
+
+```python
+N = 200
+content = " ".join(f"Sentence number {i}." for i in range(N)).encode("utf-8")  # 4089 bytes
+jobs_before = len(app_module.jobs)
+resp = client.post("/generate/long-form",
+                    data={"file": (io.BytesIO(content), "book.txt")},
+                    content_type="multipart/form-data")
+jobs_after = len(app_module.jobs)
+tasks = drain(app_module.text_queue)
+```
+
+Observed:
+
+| Measured | Value |
+|---|---|
+| Sentences in the uploaded file | 200 (4089-byte upload) |
+| `register_job` entries created (growth of `jobs`) | **201** (200 segments + 1 `long_form_parent`) |
+| Items placed on `text_queue` | **200** |
+| HTTP status / cost to the caller | `201`, one request |
+
+One unauthenticated `POST` produced a 200:1 ratio of queue items to
+requests (201:1 counting the parent registry entry), and returned
+immediately — enqueuing never blocks, because `text_queue` has no
+`maxsize` (above). For the single serial worker (`DESIGN.md`, "One model,
+one worker, one queue"), this means one upload can occupy the entire
+queue depth behind which every other caller's `/generate`,
+`/generate/long-form`, or `/v1/audio/speech` job — from any client, not
+just this one — has to wait its turn; nothing partitions the queue by
+caller or job kind.
+
+**The per-job `threading.Timer` does *not* amplify the same way.** Tracing
+`_schedule_expiration` (`app.py:440-469`) against its call sites shows it is
+invoked once per **segment's own completion** only when that segment has no
+`parent_job_id` (`app.py:892-893`/`899-900`) — i.e., never for a segment,
+since every segment has one. For a long-form upload, `_schedule_expiration`
+fires exactly **once**, for the parent, after `_handle_segment_complete`
+(`app.py:629-671`) observes that all `N` segments have finished (whether
+that means concatenation succeeded or one segment errored). So `N` segments
+amplify `text_queue` depth and `jobs` registry size by `N`, but not the
+number of live timers — that stays at one per long-form upload, matching a
+single `/generate` job.
+
+### The three text-input paths, compared
+
+| Endpoint | Cap on text length | Source |
+|---|---|---|
+| `POST /v1/audio/speech` | **4096 characters** | `_SPEECH_INPUT_MAX_CHARS = 4096` (`app.py:233`), enforced by `_validate_speech_input` (`app.py:236-256`, called at `app.py:1162`). A **deliberate compatibility decision**: mirrors the upstream OpenAI dialect's own hard cap (`DESIGN.md`, "Compatibility target"), so a standard client oversending gets a documented `400` naming `/generate/long-form` rather than a timeout. |
+| `POST /generate` | **None** | `JobGenerationModel.text: str` (`app.py:297-298`) carries no `Field` length constraint, and `post_generate` (`app.py:993-1023`) checks only truthiness (`if not body.text`). An absence, not a decision. |
+| `POST /generate/long-form` | **None** | `form.file.read().decode("utf-8")` (`app.py:1097`) has no size argument; `LongFormGenerationForm.file` (`app.py:315-317`) carries no size constraint; `app.config["MAX_CONTENT_LENGTH"]` is `None` (above). An absence, not a decision. |
+
+### Disk growth
+
+WAVs a long-form upload causes to exist on disk, per the trace above: `N`
+segment files (`<seg_id>.wav`, deleted once concatenation succeeds) plus one
+concatenated `<parent_id>.wav` (deleted only when the parent job expires or
+is explicitly `DELETE`d). What an unauthenticated caller can cause to
+accumulate is bounded only by upload frequency and `JOB_EXPIRATION_SECONDS`
+(default `300`, `CONTRIBUTING.md`, "Environment variables"):
+
+- **At the default (`JOB_EXPIRATION_SECONDS=300`)**: every completed or
+  errored job (single, long-form parent — segments are cleaned by
+  concatenation or, on a segment error, by the parent's own expiration
+  sweep, per `_expire_job`, `app.py:707-737`, which removes every `jobs`
+  entry whose `parent_job_id` matches) is purged, WAV included, 300 seconds
+  after it finishes. An attacker who submits uploads faster than every 300
+  seconds accumulates real, if bounded, extra disk usage between purges; one
+  that submits a single upload with one unbounded no-terminator "sentence"
+  (above) ties up the worker for however long that synthesis takes, before
+  the 300-second clock on its own expiration even starts.
+- **When `JOB_EXPIRATION_SECONDS <= 0`** (documented, supported —
+  `CONTRIBUTING.md`, same table — "disables expiration entirely"): no
+  timer is ever scheduled (`app.py:447-448`, the first line of
+  `_schedule_expiration`), so nothing purges a finished job's WAV(s)
+  automatically, ever. The only remaining removal path is an explicit
+  `DELETE /job/<id>`, which needs the caller to know that job's UUID — an
+  attacker filling disk with their own uploads always knows their own ids,
+  so this is not a backstop against the attacker who caused the growth,
+  only against an unrelated caller trying to clean up someone else's job.
+- **Across a restart**: `text_queue`, `jobs`, `long_form_jobs`, and
+  `expiration_timers` are all in-memory and are lost — this is
+  `DESIGN.md`, "State is in memory, and that is accepted", and is not a
+  finding on its own. What is worth recording here: `_sweep_orphan_wavs()`
+  (`app.py:689-704`) runs once at the next startup and deletes **every**
+  UUID-named `*.wav` in `OUTPUT_DIR`, because the freshly-restarted
+  registry is empty and every such file therefore looks orphaned —
+  including a completed job's WAV a client had not yet downloaded. Named
+  voice samples (non-UUID basenames) are untouched. So a restart is a full,
+  automatic cleanup of every job-output WAV regardless of expiration
+  configuration, but it also means `JOB_EXPIRATION_SECONDS <= 0` only
+  removes the automatic *in-process* backstop — accumulation between
+  restarts, not forever, unless the process also never restarts.
+
+### Rate limiting
+
+**Assessed as a finding.** `DESIGN.md`, "Future work", lists rate limiting
+as deliberately excluded from `EP-03`'s baseline ("once authentication
+exists"), and the task constraints reiterate that this epic implements
+nothing and that this finding "may not be slipped into another epic's
+scope." Reported and recommended here, not fixed:
+
+- **Today**: `grep -rn "limiter\|Limiter\|ratelimit\|rate.limit" src/` returns
+  no matches — no route, including `/generate/long-form`, has any per-caller
+  or global request-frequency bound. Combined with the amplification
+  measured above, a single caller can repeat a 200-sentences-per-request
+  upload as fast as the network and the receiving process allow, with no
+  backoff, no `429`, and no accounting of how many requests any one caller
+  has already made.
+- **Recommendation**: rate limiting (e.g. `flask-limiter`), scoped per
+  bearer token once `EP-03`'s authentication work lands (a per-IP limit is a
+  weaker proxy on a service meant to be reached by agents, which may
+  legitimately share egress IPs) — this is exactly the sequencing
+  `DESIGN.md` already states ("once authentication exists"), so this report
+  does not re-argue it, only confirms today's absence and flags it as the
+  natural next control once a caller identity exists to key it by.
+
+### Findings: upload and request limits
+
+Numbering continues from `F-07` above.
+
+#### F-08: Neither native text-input endpoint caps input size; a single request amplifies into an unbounded number of queued jobs
+
+**Severity:** High — exploitable today without a credential (`T-03-01-01`:
+nothing checks one), and the mechanism reaches every other caller of the
+single shared queue and worker (`DESIGN.md`, "One model, one worker, one
+queue"), not just the requester's own jobs — this is unauthorized
+disruption of the service as a whole, short of full host compromise.
+
+**Reproduction:** `POST /generate/long-form` with a 4089-byte, 200-sentence
+file returns `201` and produces 200 `text_queue` entries and 201 `jobs`
+registry entries from one request (measured above); nothing in
+`JobGenerationModel`, `LongFormGenerationForm`, or `app.config` bounds
+either the sentence count or the byte size that produces it, unlike
+`POST /v1/audio/speech`'s `_SPEECH_INPUT_MAX_CHARS` (`app.py:233`).
+
+#### F-09: A no-terminator upload becomes one unbounded-length segment, with no bound on how long the sole worker spends synthesising it
+
+**Severity:** High — exploitable today without a credential, and worse than
+F-08's queue-depth amplification in one respect: this is a *single* segment,
+so it is not stopped by anything that might someday cap sentence count or
+upload size without also capping per-sentence length; and once the worker
+starts that one `tts.tts_to_file` call there is no timeout to interrupt it
+(`JOB_WAIT_TIMEOUT_SECONDS` bounds only `/v1/audio/speech`'s blocking
+*wait*, not how long the worker itself may run) — a `DELETE` of the job
+while it is mid-synthesis is accepted but does not interrupt the call in
+progress (`_process_task`, `app.py:862`/`879`, only checks
+`_job_registered` before starting and after `tts_to_file` returns), so the
+worker still runs to completion regardless. Every other queued job, from
+every caller, waits behind it the entire time.
+
+**Reproduction:** `POST /generate/long-form` with a file containing no
+`.`/`!`/`?` and no blank line (e.g. the 70-byte probe above) returns `201`
+with exactly one segment enqueued whose `text` is the entire file content
+unchanged — `_split_sentences`'s regex (`app.py:118`) has nothing to split
+on, so `re.split` returns its single input string. There is no length check
+between that upload and the `tts.tts_to_file` call that eventually consumes
+it.
+
+#### F-10: No rate limiting exists on any route, so F-08/F-09's amplification is bounded only by how fast one caller can send requests
+
+**Severity:** High — exploitable today without a credential, compounds
+directly with F-08 and F-09 (repetition is the only additional ingredient
+needed to turn a bounded amplification into an unbounded one), and matches
+this severity tier's "unauthorized... disruption... short of full
+compromise" language exactly. Recorded as a finding with a recommendation,
+per this task's acceptance criteria, rather than fixed — `DESIGN.md`,
+"Future work", already defers rate limiting to work sequenced after
+authentication, and this finding does not reopen that sequencing.
+
+**Reproduction:** `grep -rn "limiter\|Limiter\|ratelimit\|rate.limit" src/`
+returns no matches; nothing rejects a rapid, repeated
+`POST /generate/long-form` (or any other route) with a `429` or any other
+frequency-based response.
+
+#### F-11: Disabling job expiration removes the only automatic backstop against F-08/F-09's disk accumulation, with no alternative cleanup an outside caller can trigger
+
+**Severity:** Medium — exploitable today without a credential, but needs a
+non-default configuration precondition (`JOB_EXPIRATION_SECONDS <= 0`,
+`CONTRIBUTING.md`, "Environment variables") that a deployer must have
+deliberately chosen; at the shipped default (`300`) the same accumulation is
+bounded by the 300-second purge cycle instead (see
+[Disk growth](#disk-growth) above).
+
+**Reproduction:** `_schedule_expiration` (`app.py:440-469`) returns
+immediately, before scheduling anything, whenever `JOB_EXPIRATION_SECONDS <=
+0` (`app.py:447-448`); with that configuration, `_expire_job` (the only
+function that removes a finished job's WAV(s) and registry entries,
+`app.py:707-737`) is never invoked automatically, and the only remaining
+trigger is a `DELETE /job/<id>` naming a specific job's own UUID.
+
+## Out of scope for this task
+
+Per this task's own "Out of scope": the `speaker_wav` form field on
+`/generate/long-form` (`T-03-01-02`, above); the gunicorn deployment's single
+sync worker and 30-second timeout (a recorded deviation, `T-03-01-05`'s
+platform section); authentication as a mitigation for any finding above
+(`T-03-01-01`'s finding; this report records only that these limits are
+reachable by any caller); and any change to `src/`, `tests/`, or the
+specification documents — this task adds a cap, a `MAX_CONTENT_LENGTH`, or a
+queue bound to nothing. `DESIGN.md` and `KNOWN_ISSUES.md` are not edited
+here; `US-03-02` owns deciding what to do with F-08 through F-11 above.

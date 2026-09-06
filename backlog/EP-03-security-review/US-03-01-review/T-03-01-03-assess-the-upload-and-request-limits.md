@@ -5,7 +5,7 @@ schema_version: '2'
 title: Assess the long-form upload and the absence of request limits
 epic: EP-03
 story: US-03-01
-status: todo
+status: done
 deps:
 - T-03-01-02
 scope:
