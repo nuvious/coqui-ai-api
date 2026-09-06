@@ -5,7 +5,7 @@ schema_version: '2'
 title: Assess dependency and platform exposure and close the report
 epic: EP-03
 story: US-03-01
-status: todo
+status: done
 deps:
 - T-03-01-04
 scope:

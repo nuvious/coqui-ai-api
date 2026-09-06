@@ -1394,3 +1394,355 @@ nothing). The container's network exposure and the gunicorn deployment are
 `T-03-01-05`'s platform section. `DESIGN.md` and `KNOWN_ISSUES.md` are not
 edited here; `US-03-02` owns deciding what to do with F-12 through F-15
 above.
+
+## Dependency exposure
+
+`EP-03`, "Constraints on scope", says not to re-audit the container's
+inherited vulnerabilities but to cite it. This section does that: it cites
+`DESIGN.md`'s two dependency-facing records rather than re-deriving either,
+and records today's `make audit` result as evidence of the state now.
+
+### The three accepted `transformers` advisories
+
+`DESIGN.md`, "The transformers pin, and three accepted advisories" is the
+authoritative record. `coqui-tts` 0.27.5's tortoise layer imports
+`transformers.pytorch_utils.isin_mps_friendly`, a symbol removed in
+`transformers` 5.1.0, which forces a `transformers==5.0.0` pin; no release
+both keeps that symbol and clears every advisory `pip-audit` reports below
+it. Three advisories are carried against the pin, each with a reachability
+argument recorded there in full and not restated here beyond its one-line
+gist:
+
+- **PYSEC-2026-2289** — RCE via `Trainer`'s `torch.load`; this project never
+  trains and never imports `Trainer`.
+- **PYSEC-2026-2290** — RCE loading LightGlue weights; this project only
+  ever loads XTTS v2, never LightGlue.
+- **CVE-2026-9856** — arbitrary file write via unvalidated `chat_template`
+  keys in `save_pretrained()`; this project never calls `save_pretrained()`
+  (its only occurrence anywhere in the installed `coqui-tts` tree is
+  commented out) and loads no `transformers` tokenizer or processor from an
+  untrusted repository (XTTS v2 tokenizes with `VoiceBpeTokenizer`, not a
+  `PreTrainedTokenizerBase`).
+
+**What a security reader should re-test if anything changes:** each
+argument rests on a specific absence in this project's own code and in the
+installed `coqui-tts` tree. `DESIGN.md` itself names the two changes that
+would reopen `CVE-2026-9856`'s argument — adding a `save_pretrained()` call,
+or loading a `transformers` tokenizer/processor from a caller-supplied
+repository id — and the same shape of check covers the other two: a future
+import of `Trainer` or of a LightGlue loader reopens its matching advisory.
+A grep for those symbols (`Trainer`, `LightGlue`, `save_pretrained`,
+`PreTrainedTokenizerBase`, `ProcessorMixin`) against `src/` and the
+installed `coqui-tts` tree is the cheap re-test; it is what confirmed the
+state recorded above and below.
+
+**Current state, recorded as evidence:**
+
+```
+$ make audit
+uv run pip-audit \
+	--ignore-vuln PYSEC-2026-2289 \
+	--ignore-vuln PYSEC-2026-2290 \
+	--ignore-vuln CVE-2026-9856
+No known vulnerabilities found, 4 ignored
+Name         Skip Reason
+------------ ------------------------------------------------------------------------------
+coqui-ai-api Dependency not found on PyPI and could not be audited: coqui-ai-api (0.1.1)
+torch        Dependency not found on PyPI and could not be audited: torch (2.13.0+cpu)
+torchaudio   Dependency not found on PyPI and could not be audited: torchaudio (2.11.0+cpu)
+torchcodec   Dependency not found on PyPI and could not be audited: torchcodec (0.15.0+cpu)
+```
+
+Run 2026-09-06, in this session — this session did have network access for
+this one check, confirmed by `pip-audit` reaching PyPI's advisory data
+successfully; that is not true of the Trivy re-scan below, which needs
+Docker as well (see [What this review could not check
+offline](#what-this-review-could-not-check-offline)). `pip-audit` reports
+"4 ignored" against the three `--ignore-vuln` flags passed; direct
+inspection (`pip-audit -f json`) shows `transformers` itself carries zero
+un-ignored vulnerabilities at 5.0.0, so the fourth count is `pip-audit`'s
+own alias bookkeeping (more than one advisory identifier resolving to the
+same underlying record), not a fourth accepted advisory. The four skip
+lines are unrelated to the ignore list: `pip-audit`'s default `pypi`
+vulnerability service matches installed packages against **published** PyPI
+releases, and this project itself (unpublished) plus the three
+CPU-suffixed torch packages (the `+cpu` local version segment the CPU wheel
+index produces, `DESIGN.md`, "The runtime image base, and which PyTorch it
+ships") have no matching PyPI release string, so `pip-audit` cannot audit
+them at all under this configuration — a coverage gap distinct from the
+pin, recorded so a reader does not read "no known vulnerabilities found" as
+covering every installed package.
+
+### The runtime image's vulnerability surface, and why it is stale
+
+`DESIGN.md`, "Known deviations" and "Future work", "Measure and scan the
+migrated image", record the only measurement that exists: a Trivy scan on
+2026-07-30, against the pre-migration `TTS==0.22.0`-based image, found
+**435 HIGH and 24 CRITICAL** findings, most attributed to the 2023-era
+Ubuntu base rather than this project's own code. The move to a slim
+`python:3.11-slim-bookworm` base (see [The shipped
+runtime](#the-shipped-runtime), below) that no longer bundles a
+CUDA-matched torch is *expected* to shrink that count, but nothing since
+2026-07-30 has re-run the scan against the image this repository now
+builds. The figure is a pre-migration baseline, not a current measurement,
+and per `EP-03`'s "Constraints on scope" this review does not re-derive it.
+
+**What a security reader should re-test:** re-scanning the built image, the
+one thing that would replace the baseline with a current figure, is a
+maintainer step — it needs `docker build` and Trivy against the resulting
+image, neither of which this session has (see [What this review could not
+check offline](#what-this-review-could-not-check-offline)).
+
+## The shipped runtime
+
+What the `Dockerfile` and `docker-compose.yaml` actually run, as they ship
+today — not a re-audit of the base image's inherited packages (the
+dependency section above), but this project's own build and compose
+choices, each with the file and line it comes from.
+
+- **The process, and the user it runs as.** The runtime stage's
+  `ENTRYPOINT`/`CMD` (`Dockerfile:69-70`) is `gunicorn --bind 0.0.0.0:5000
+  coqui_ai_api.app:app` — gunicorn is the process that serves every
+  request, not the `coqui-ai-api` console script `pyproject.toml:29-30`
+  also installs (that entry point is reachable only through the
+  commented-out alternative `ENTRYPOINT`/`CMD` at `Dockerfile:72-74`, "For
+  local debugging"). Neither the builder stage (`Dockerfile:4`) nor the
+  runtime stage (`Dockerfile:47`) declares a `USER`, and nothing in either
+  stage creates or switches to a non-root account; the base image,
+  `python:3.11-slim-bookworm`, does not set a non-root default either.
+  Gunicorn and every worker it forks therefore run as **root**.
+- **The published port and the interface it binds.**
+  `docker-compose.yaml:9-10` publishes `5000:5000` on the host; inside the
+  container, gunicorn's `--bind 0.0.0.0:5000` (`Dockerfile:70`) listens on
+  every interface, not a loopback- or bridge-scoped address. A default
+  `docker compose up` therefore exposes port 5000 on every interface the
+  host itself has, not only the Docker bridge network.
+- **The mounted volumes.** `docker-compose.yaml:11-13` mounts two host
+  directories in: `./workspace:/workspace` — the directory `CONFIG_FILE`,
+  `OUTPUT_DIR`, and every route this report's [route
+  enumeration](#route-enumeration) and [data exposure](#data-exposure)
+  sections examine read and write through — and `./models:/root/.local/share/tts`,
+  the model cache, owned by the root process above. Neither mount carries a
+  `:ro` suffix; both are writable from inside the container.
+- **`main()`'s `host="0.0.0.0"`.** `src/coqui_ai_api/app.py:1261-1262` —
+  `def main(): app.run(host="0.0.0.0", port=5000)` — is what
+  `pyproject.toml:29-30`'s `coqui-ai-api` console script invokes. It calls
+  Flask's own development server (Werkzeug's `run_simple`), bound to every
+  interface, not gunicorn. The shipped `Dockerfile`'s active `CMD`
+  (`Dockerfile:70`) does not invoke this path at all — it runs gunicorn
+  directly against the `coqui_ai_api.app:app` object — so `main()`'s
+  binding is reachable only via the commented-out alternative entrypoint
+  (`Dockerfile:72-74`) or by running the console script directly outside a
+  container. Flask's own documentation states this development server is
+  not intended for production use; running it this way carries both the
+  all-interfaces bind and that server's own lesser hardening (unthreaded by
+  default, no protection against the traffic patterns a real WSGI server is
+  built to handle).
+
+### The gunicorn deviation, assessed for security relevance
+
+`DESIGN.md`, "Known deviations" already records this deviation in full and
+is cited rather than restated or re-verified: the shipped `Dockerfile`/
+`docker-compose.yaml` run the app under gunicorn with no `--timeout`,
+`--workers`, or `--threads`, so gunicorn 23.0.0's own defaults apply — one
+synchronous worker, a 30-second worker timeout, no threads. That is below
+`JOB_WAIT_TIMEOUT_SECONDS`'s default (300 seconds) and below what XTTS v2
+needs for anything past a short sentence, so gunicorn's arbiter kills the
+worker before the app's documented `504` path ever runs; the caller gets a
+generic `500` instead, the replacement worker loses every other in-flight
+job's in-memory state, and one sync worker with no threads means no other
+route — including `GET /health` — is served for the duration of any
+synthesis.
+
+**Security relevance, stated concretely, and distinct from [F-08 through
+F-10](#findings-upload-and-request-limits):**
+
+- **Availability.** One sync worker serving the whole process means a
+  single in-flight synthesis — triggered by any unauthenticated caller,
+  with no crafted payload needed, since the deviation's own text states an
+  ordinary XTTS v2 sentence already exceeds gunicorn's 30-second worker
+  timeout — makes every other route unreachable for that duration, and
+  every 30-second-triggered worker restart drops whatever other jobs were
+  mid-flight. This is a stronger, unconditional version of the
+  amplification F-08 through F-10 already report: those need a large or
+  malformed payload to compound; this one fires on the platform's default
+  configuration alone, with no attacker-supplied input at all.
+- **A liveness probe that fires mid-synthesis.** `GET /health` is the one
+  route `DESIGN.md`'s security model exempts from authentication
+  specifically so that "liveness probes work without a credential" — but
+  the same sync-worker serialisation that blocks every other route during
+  a synthesis blocks `/health` too. A liveness probe configured against
+  this deployment (Kubernetes, Docker, or any external monitor) that fires
+  during a synthesis gets no response until the worker either finishes or
+  is killed at 30 seconds, which a probe with a shorter timeout or a low
+  failure threshold reads as the process being down — restarting or
+  failing over a process that was in fact serving a job, and compounding
+  the same in-memory job loss the deviation already names.
+
+### Findings: dependency and platform exposure
+
+Numbering continues from `F-15` above.
+
+#### F-16: The runtime image's vulnerability surface is unmeasured against a stale, pre-migration baseline
+
+**Severity:** Informational — not a determination that the current image
+carries a specific vulnerability; a recorded measurement gap against a
+baseline both `DESIGN.md` and this report already state is expected to
+have improved, not a fresh finding of exposure this task derived
+independently (`EP-03`, "Constraints on scope" forbids re-auditing this
+surface).
+
+**Reproduction:** `DESIGN.md`, "Known deviations" and "Future work",
+"Measure and scan the migrated image", record the 2026-07-30 baseline (435
+HIGH / 24 CRITICAL, against the pre-migration image) and that nothing has
+re-scanned the image built from the current `Dockerfile` since.
+
+#### F-17: The shipped gunicorn configuration serialises the whole API behind one synthesis, unconditionally on the platform's default configuration
+
+**Severity:** High — exploitable today without a credential (`T-03-01-01`:
+nothing checks one), needs no crafted or oversized input (an ordinary
+XTTS v2 synthesis already exceeds the 30-second worker timeout), and
+disrupts every other caller's access to every route — including the
+liveness probe — for the duration, matching this report's "High" tier
+("unauthorized... disruption... short of full compromise") exactly.
+
+**Reproduction:** `Dockerfile:69-70`'s `CMD` sets no `--timeout`,
+`--workers`, or `--threads`; gunicorn 23.0.0's defaults (one sync worker,
+30-second timeout) are what then apply, per `DESIGN.md`, "Known
+deviations", "found and verified live 2026-09-06, in `T-02-02-03` review."
+
+#### F-18: The container runs every process as root; no stage declares a non-root user
+
+**Severity:** Informational — not independently exploitable (nothing in
+this report identifies a way to reach arbitrary code execution inside the
+container); recorded because it sets the blast radius for any RCE this
+report's other findings do not themselves grant, including a future
+`transformers`/`coqui-tts` advisory this project's pin does not yet carry.
+
+**Reproduction:** `grep -n "^USER" Dockerfile` returns no matches; neither
+the builder stage (`Dockerfile:4`) nor the runtime stage (`Dockerfile:47`)
+switches away from the base image's default root user.
+
+#### F-19: `main()`'s console-script entrypoint runs Flask's development server bound to all interfaces
+
+**Severity:** Informational — reachable only through a non-default path
+(the commented-out `Dockerfile:72-74` entrypoint, or running the
+`coqui-ai-api` console script directly outside the shipped container); the
+routes it would expose are identical to gunicorn's, so it changes this
+service's own hardening properties, not which routes or data are reachable
+beyond what the rest of this report already establishes.
+
+**Reproduction:** `src/coqui_ai_api/app.py:1261-1262` —
+`def main(): app.run(host="0.0.0.0", port=5000)` — is the function
+`pyproject.toml:29-30`'s `coqui-ai-api` script points at; the shipped
+`Dockerfile`'s active `CMD` (`Dockerfile:70`) never calls it.
+
+## Out of scope for this task
+
+Per this task's own "Out of scope": building, scanning, or running the
+container image (Docker is not available to this session, per
+`CONTRIBUTING.md`, "Additional rules for agents"); upgrading any
+dependency, editing the `audit` target, or touching `pyproject.toml` /
+`uv.lock`; and assigning dispositions, proposing epics, or editing
+`DESIGN.md` — `US-03-02` owns deciding what to do with F-16 through F-19
+above, and every finding before them.
+
+## Finding index
+
+Every `F-NN: ...` finding heading in this file, in the order it was
+written, with an empty disposition column for `US-03-02` to fill.
+Generated from this file's own headings (`F-01` and `F-02` are `###`,
+`F-03` onward are `####` — a pre-existing inconsistency from `T-03-01-01`,
+not corrected here since this task's scope is content, not earlier tasks'
+formatting); the count below (19) matches the count of `F-NN:` finding
+headings in this file.
+
+Severity was reviewed across the whole list for this task (`T-03-01-05`'s
+constraint: "severity across the whole index must be consistent"); nothing
+in F-01 through F-15 looked miscalibrated against the vocabulary defined in
+[Conventions this report uses](#conventions-this-report-uses) once F-16
+through F-19 were placed alongside them, so no earlier severity is changed
+here.
+
+| ID | Title | Severity | Route / component | Disposition |
+|---|---|---|---|---|
+| F-01 | `DESIGN.md`, "Known deviations", cites a stale route count and line number | Informational | `DESIGN.md` (doc accuracy) | |
+| F-02 | `CONTRIBUTING.md`, "API surface", omits 16 of 27 routes | Informational | `CONTRIBUTING.md` (doc accuracy) | |
+| F-03 | `speaker_wav`'s unusable values are silently replaced by the default sample, never rejected | Low | `POST /generate`, `POST /generate/long-form` | |
+| F-04 | A symlink already inside `OUTPUT_DIR` is followed by both guards, and published by `GET /voices` | Informational | `speaker_wav` / `voice` / `OUTPUT_DIR` | |
+| F-05 | `speaker_wav` and `voice` are two independently written guards over the same resource, and they already disagree | Informational | `speaker_wav` / `voice` handling | |
+| F-06 | `DELETE /job/<id>` deletes any file in `OUTPUT_DIR` named `<id>.wav`, including a named voice sample that was never a job | High | `DELETE /job/<job_id>` | |
+| F-07 | `job_id` reaches `_get_filename` with no validation at all; today's immunity to traversal is Werkzeug's routing, not this code | Informational | `GET`/`DELETE /job/<job_id>`, `GET /job/<job_id>/progress` | |
+| F-08 | Neither native text-input endpoint caps input size; a single request amplifies into an unbounded number of queued jobs | High | `POST /generate`, `POST /generate/long-form` | |
+| F-09 | A no-terminator upload becomes one unbounded-length segment, with no bound on how long the sole worker spends synthesising it | High | `POST /generate/long-form` | |
+| F-10 | No rate limiting exists on any route, so F-08/F-09's amplification is bounded only by how fast one caller can send requests | High | All routes | |
+| F-11 | Disabling job expiration removes the only automatic backstop against F-08/F-09's disk accumulation, with no alternative cleanup an outside caller can trigger | Medium | `JOB_EXPIRATION_SECONDS` / all job routes | |
+| F-12 | CORS ships allowing every origin, every method and every header, on every route, under both shipped config files | High | CORS config (`app.py:288`), all routes | |
+| F-13 | `GET /voices` and the OpenAPI documentation routes disclose operator-chosen names and the full API schema to any unauthenticated, cross-origin-readable caller | Low | `GET /voices`, `GET /openapi/*` | |
+| F-14 | `GET /ready` discloses live queue depth, model-load state and worker liveness to any unauthenticated caller | Low | `GET /ready` | |
+| F-15 | `app.logger.info(f"Text: {body.text}")` writes every caller's full, unbounded submitted text to the process's stdout in plaintext, with no redaction path anywhere in the codebase | Medium | `POST /generate` (logging) | |
+| F-16 | The runtime image's vulnerability surface is unmeasured against a stale, pre-migration baseline | Informational | Runtime image (`Dockerfile`; Trivy scan) | |
+| F-17 | The shipped gunicorn configuration serialises the whole API behind one synthesis, unconditionally on the platform's default configuration | High | gunicorn deployment (`Dockerfile`, `docker-compose.yaml`) | |
+| F-18 | The container runs every process as root; no stage declares a non-root user | Informational | `Dockerfile` (both stages) | |
+| F-19 | `main()`'s console-script entrypoint runs Flask's development server bound to all interfaces | Informational | `src/coqui_ai_api/app.py:1261-1262` | |
+
+## What this review could not check offline
+
+- **Current authoritative guidance for Flask, gunicorn, and the OpenAI
+  dialect `/v1/audio/speech` implements.** `EP-03`'s constraint is explicit:
+  "Live research needs network access, which an autonomous session does
+  not have. Anything that turns on current guidance rather than on reading
+  this repository is a maintainer step. Say so rather than answering from
+  recall." Every claim in this report is measured against this
+  repository's own code and `DESIGN.md`'s recorded decisions, not against
+  current upstream security guidance for Flask deployments, gunicorn
+  hardening, or the OpenAI API's own current dialect. A maintainer with
+  network access should check current Flask/gunicorn deployment-hardening
+  guidance against [The shipped runtime](#the-shipped-runtime) and [the
+  gunicorn deviation](#the-gunicorn-deviation-assessed-for-security-relevance)
+  above, and check the OpenAI API's current `/v1/audio/speech` reference
+  against `DESIGN.md`, "Compatibility target", for drift this project's
+  compatibility layer has not tracked.
+- **The Trivy re-scan of the built image.** Needs `docker build` and Trivy
+  against the resulting image; this session has neither Docker nor, unlike
+  the `pip-audit` run recorded above, a confirmed-reachable network path
+  for that specific tool. See [The runtime image's vulnerability surface,
+  and why it is stale](#the-runtime-images-vulnerability-surface-and-why-it-is-stale)
+  and `DESIGN.md`, "Future work", "Measure and scan the migrated image",
+  for exactly what a maintainer should run and compare against.
+- **Browser behaviour `T-03-01-04`'s CORS section depends on.** That
+  task's own constraint required marking any claim depending on how a
+  specific browser behaves today as a maintainer check rather than
+  asserting it, but its final text does not use that language anywhere.
+  Two claims in that section are, on inspection, exactly that shape: (1)
+  that a passing preflight causes a real browser to send the follow-up
+  request and expose the JSON response to the requesting page's own
+  script — true by the Fetch/CORS specification, and consistent with the
+  response headers this report measured via the Flask test client, but not
+  exercised against an actual browser engine's implementation of it; and
+  (2) whether a browser on a public origin can reach a private-network
+  target at all in the "victim on the same LAN" scenario that section
+  describes — some current browsers apply a separate, evolving check for
+  exactly that cross-network-class request (independent of this service's
+  own CORS response headers), and this report does not know its current
+  enforcement status in any specific browser, per `EP-03`'s "say so rather
+  than answering from recall." A maintainer with a real, current browser
+  and a running instance of this service on a LAN should confirm both.
+
+## Coverage: `US-03-01` and `EP-03`
+
+Checked against `US-03-01`'s six acceptance criteria and `EP-03`'s first
+three, so `US-03-02` inherits a complete list rather than having to
+re-derive it.
+
+| Criterion | Source | Met? | Where / note |
+|---|---|---|---|
+| Every route in `app.py` listed with method, path, request inputs, disk reads/writes, and whether it checks anything | `US-03-01` AC1 | Yes | [Route enumeration](#route-enumeration) |
+| The gap between each route and `DESIGN.md`, "Security model", is stated | `US-03-01` AC2 | Yes | "Gap vs. Security model" column, same tables |
+| Input handling assessed specifically for `/generate/long-form`'s upload and `speaker_wav` | `US-03-01` AC3 | Yes | [Input handling: `speaker_wav`, `voice` and `job_id`](#input-handling-speaker_wav-voice-and-job_id), [The long-form upload path, and the absence of request limits](#the-long-form-upload-path-and-the-absence-of-request-limits) |
+| The CORS configuration is assessed as it ships, including the omitted-key default | `US-03-01` AC4 | Yes | [CORS as it ships](#cors-as-it-ships) |
+| Data exposure through job ids, `/voices` and the workspace directory is assessed | `US-03-01` AC5 | Yes | [Data exposure](#data-exposure) |
+| The report is written where `US-03-02` can read it, and its location is stated in the task result | `US-03-01` AC6 | Yes | `docs/security-review/report.md`; stated in this and every prior task's `.orchestrator/result.json` |
+| A findings report exists covering authentication, authorization, input handling, data exposure, and dependency and platform exposure, measured against `DESIGN.md`'s Security model and against current authoritative guidance for the stack | `EP-03` AC1 | **Partially** | Authentication, input handling, data exposure, and dependency/platform exposure each have a dedicated section measured against `DESIGN.md`. Authorization has no section of its own; it is covered only as cross-cutting commentary — the [Job ids](#job-ids) section states plainly that "there is no ownership or session concept anywhere in the codebase," and F-06 is an authorization gap in substance — so the substance exists without the label. Measurement against **current authoritative guidance** was not performed at all: this review measures against `DESIGN.md`'s recorded decisions and this repository's own code, not against live upstream guidance, per `EP-03`'s own constraint that live research needs network access an autonomous session does not have. See [What this review could not check offline](#what-this-review-could-not-check-offline). |
+| Every route is enumerated with its current authentication state, including anything `EP-02` added | `EP-03` AC2 | Yes | [Route enumeration](#route-enumeration) includes `POST /v1/audio/speech`, named as `EP-02`'s addition |
+| The CORS default is assessed as shipped, not as configured in an example | `EP-03` AC3 | Yes | [CORS as it ships](#cors-as-it-ships), [Both shipped config paths, checked](#both-shipped-config-paths-checked) |
