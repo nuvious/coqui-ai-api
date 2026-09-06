@@ -597,6 +597,7 @@ never started); `is_worker_alive()` checks it and backs the `/ready` endpoint.
 |--------|------|---------|
 | POST | `/generate` | Enqueue a TTS job; returns `201 {"job_id": "<uuid>"}` |
 | POST | `/generate/long-form` | Enqueue a long-form job from an uploaded text file; returns `201 {"job_id": "<uuid>"}` |
+| POST | `/v1/audio/speech` | OpenAI-compatible synchronous TTS; serves `response_format` values `mp3` (default), `opus`, `flac`, `wav`, `pcm`, and rejects `aac` with a `400` |
 | GET | `/job/<id>` | Download the generated WAV (404 while still processing) |
 | GET | `/job/<id>/progress` | Job progress (`total`/`completed`/`status`, plus `position`/`queue_seconds`/`generation_seconds`/`total_seconds`/`expires_at` ETA fields) |
 | DELETE | `/job/<id>` | Delete a job's WAV and purge its registry/long-form/expiration-timer state |

@@ -5,7 +5,7 @@ schema_version: '2'
 title: Settle and implement what response_format does
 epic: EP-02
 story: US-02-02
-status: todo
+status: done
 deps:
 - T-02-02-01
 scope:

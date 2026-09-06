@@ -1,5 +1,6 @@
 import enum
 import glob
+import io
 import itertools
 import os
 import queue
@@ -13,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from logging.config import dictConfig
 from typing import Annotated
 
+import soundfile  # type: ignore[import-untyped]  # soundfile ships no stubs
 import yaml
 from flask import Response, jsonify, make_response, render_template, send_file
 from flask_cors import CORS
@@ -158,6 +160,66 @@ def _resolve_voice(voice: str) -> str | Response:
         jsonify({"message": "Unknown voice. See GET /voices for available voices."}),
         400,
     )
+
+
+# response_format -> (Content-Type, libsndfile format, libsndfile subtype).
+# ``wav`` and ``pcm`` are handled outside libsndfile (see
+# ``_encode_speech_audio``) but still carry a Content-Type entry here, so the
+# served set is expressed exactly once (`DESIGN.md`, "What `response_format`
+# serves, and what it rejects").
+_RESPONSE_FORMATS: dict[str, tuple[str, str | None, str | None]] = {
+    "mp3": ("audio/mpeg", "MP3", "MPEG_LAYER_III"),
+    "opus": ("audio/ogg", "OGG", "OPUS"),
+    "flac": ("audio/flac", "FLAC", "PCM_16"),
+    "wav": ("audio/wav", None, None),
+    "pcm": ("audio/pcm", None, None),
+}
+
+
+def _encode_speech_audio(
+    wav_path: str, response_format: str = "mp3"
+) -> tuple[bytes, str] | Response:
+    """Encode a finished job's WAV output for ``/v1/audio/speech``.
+
+    ``response_format`` defaults to ``mp3``, matching upstream's own default
+    for an absent field. An unsupported value -- ``aac`` or anything else --
+    returns a 400 naming the five values that are served, rather than
+    silently falling back to WAV or another format's bytes (`DESIGN.md`,
+    "What `response_format` serves, and what it rejects").
+
+    ``wav`` returns the worker's bytes unmodified. ``pcm`` strips the WAV
+    header and returns the signed 16-bit little-endian frames at the model's
+    native sample rate, with no resampling. The other three values are
+    re-encoded through ``soundfile`` (libsndfile).
+    """
+    entry = _RESPONSE_FORMATS.get(response_format)
+    if entry is None:
+        return make_response(
+            jsonify(
+                {
+                    "message": (
+                        f"Unsupported response_format '{response_format}'. "
+                        "Supported values: "
+                        f"{', '.join(_RESPONSE_FORMATS)}."
+                    )
+                }
+            ),
+            400,
+        )
+    content_type, sf_format, sf_subtype = entry
+
+    if response_format == "wav":
+        with open(wav_path, "rb") as wav_file:
+            return wav_file.read(), content_type
+
+    if response_format == "pcm":
+        with wave.open(wav_path, "rb") as wav_reader:
+            return wav_reader.readframes(wav_reader.getnframes()), content_type
+
+    data, samplerate = soundfile.read(wav_path, dtype="int16")
+    buffer = io.BytesIO()
+    soundfile.write(buffer, data, samplerate, format=sf_format, subtype=sf_subtype)
+    return buffer.getvalue(), content_type
 
 
 CONFIG = yaml.load(open(CONFIG_FILE, "r"), Loader=yaml.SafeLoader)
