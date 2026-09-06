@@ -559,6 +559,51 @@ rejected request enqueues nothing. The rule and the reasoning behind it are in
 `DESIGN.md`, "How `voice` resolves onto a named sample"; the asymmetry between the
 two endpoints is intentional, so do not "fix" either one to match the other.
 
+**`POST /v1/audio/speech` is the route that wires the pieces above together.**
+`post_speech` validates `input` (empty is rejected exactly like `post_generate`'s
+"Missing or empty text.", and over 4096 characters is rejected naming
+`/generate/long-form`, mirroring upstream's own cap), resolves `voice` via the
+resolver above, checks `response_format` against `_RESPONSE_FORMATS`, and checks
+`speed`, all before touching the queue — a rejection at any of these steps enqueues
+nothing. Once validation passes it calls `register_job` and puts a task on
+`text_queue` in the same shape `post_generate` uses, then calls
+`wait_for_job(job_id, timeout_seconds=JOB_WAIT_TIMEOUT_SECONDS)` and blocks. There
+is no second model instance, no new thread, and no path around the queue. On
+`WaitOutcome.SUCCEEDED` it calls `_encode_speech_audio` on the finished WAV and
+returns the encoded bytes with the matching `Content-Type`. Every other outcome
+gets a documented status and an `ErrorResponseModel` body rather than an empty or
+truncated `200`: `WaitOutcome.ERRORED` and `WaitOutcome.VANISHED` (the job was
+deleted or expired mid-wait — an internal race the compatibility client has no way
+to have caused) both return `500`; `WaitOutcome.TIMED_OUT` returns `504`, since at
+that point the service has behaved like a gateway that gave up waiting on its own
+backend. `_speech_response_for_outcome` holds this mapping in one place. In every
+non-success case the job itself is left exactly as `wait_for_job` left it: the
+route never calls `_expire_job`, `_cancel_expiration`, or `_schedule_expiration`,
+and never deletes the WAV itself, so cleanup stays the existing expiration
+machinery's job like any other job (`_process_task` already calls
+`_schedule_expiration` once the job reaches `done`/`error`, independently of
+whether a compatibility caller is still waiting).
+
+**`speed` accepts exactly `1.0` (the default) and rejects everything else with a
+`400`.** The worker has no playback-speed control — `_process_task` forwards only
+`text`, `file_path` and `speaker_wav` to `tts_to_file` — so there is no mechanism to
+honour a different value against. `1.0` is upstream's own default and means "no
+change," which is the one case that needs no mechanism at all; every other value
+would have to be silently ignored to accept it, and `US-02-01`'s notes are explicit
+that an honest error beats that. This is a full, symmetric rejection of the field's
+range rather than a partial implementation: revisiting it means adding actual
+speed control to the worker, not widening the accepted set here.
+
+**Observed concurrency note (`DESIGN.md`, "Open questions"):** exercising this
+route in the test suite (many single-threaded requests, plus the dedicated
+multi-threaded `wait_for_job` lock-discipline test) surfaced no violation of the
+four-lock rule and no deadlock; `post_speech` and `_speech_response_for_outcome`
+between them only ever take one of `jobs_lock` (via `register_job` /
+`wait_for_job`'s internals) at a time and never call anything that takes a second
+lock while holding one. This is one more instance of the existing pattern holding
+under test, not a load test, and the open question about real concurrent load
+stands as it was.
+
 Completed and errored jobs are purged automatically after `JOB_EXPIRATION_SECONDS`
 (default `300`; `<= 0` disables the mechanism entirely). `_schedule_expiration(job_id)`
 is called from `_process_task` (single jobs) and `_handle_segment_complete`

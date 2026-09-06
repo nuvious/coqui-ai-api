@@ -5,7 +5,7 @@ schema_version: '2'
 title: Serve POST /v1/audio/speech over the existing queue
 epic: EP-02
 story: US-02-01
-status: todo
+status: done
 deps:
 - T-02-01-01
 - T-02-02-01

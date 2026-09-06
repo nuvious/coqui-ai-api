@@ -176,6 +176,22 @@ _RESPONSE_FORMATS: dict[str, tuple[str, str | None, str | None]] = {
 }
 
 
+def _unsupported_response_format(response_format: str) -> Response:
+    """400 naming the five ``response_format`` values that are served."""
+    return make_response(
+        jsonify(
+            {
+                "message": (
+                    f"Unsupported response_format '{response_format}'. "
+                    "Supported values: "
+                    f"{', '.join(_RESPONSE_FORMATS)}."
+                )
+            }
+        ),
+        400,
+    )
+
+
 def _encode_speech_audio(
     wav_path: str, response_format: str = "mp3"
 ) -> tuple[bytes, str] | Response:
@@ -194,18 +210,7 @@ def _encode_speech_audio(
     """
     entry = _RESPONSE_FORMATS.get(response_format)
     if entry is None:
-        return make_response(
-            jsonify(
-                {
-                    "message": (
-                        f"Unsupported response_format '{response_format}'. "
-                        "Supported values: "
-                        f"{', '.join(_RESPONSE_FORMATS)}."
-                    )
-                }
-            ),
-            400,
-        )
+        return _unsupported_response_format(response_format)
     content_type, sf_format, sf_subtype = entry
 
     if response_format == "wav":
@@ -220,6 +225,60 @@ def _encode_speech_audio(
     buffer = io.BytesIO()
     soundfile.write(buffer, data, samplerate, format=sf_format, subtype=sf_subtype)
     return buffer.getvalue(), content_type
+
+
+# Mirrors upstream's own hard cap on ``input`` (`DESIGN.md`, "Compatibility
+# target") so an oversized compatibility request gets a documented 400 rather
+# than a timeout. `/generate/long-form` has no such cap.
+_SPEECH_INPUT_MAX_CHARS = 4096
+
+
+def _validate_speech_input(text: str) -> Response | None:
+    """400 for empty ``input``, or for ``input`` over the mirrored upstream cap.
+
+    The empty case reuses ``post_generate``'s "Missing or empty text."
+    rejection rather than enqueuing silence. The oversized case is unique to
+    this endpoint, since `/generate` has no cap; its message names
+    `/generate/long-form` as the way to submit longer text.
+    """
+    if not text:
+        return make_response(jsonify({"message": "Missing or empty text."}), 400)
+    if len(text) > _SPEECH_INPUT_MAX_CHARS:
+        return make_response(
+            jsonify(
+                {
+                    "message": (
+                        f"input exceeds {_SPEECH_INPUT_MAX_CHARS} characters. "
+                        "Use POST /generate/long-form for longer text."
+                    )
+                }
+            ),
+            400,
+        )
+    return None
+
+
+def _validate_speech_speed(speed: float) -> Response | None:
+    """400 for any ``speed`` other than 1.0, the one value the worker can honour.
+
+    ``_process_task`` forwards only ``text``, ``file_path`` and ``speaker_wav``
+    to ``tts_to_file``; there is no playback-speed control to apply a
+    different value to. Rejecting it is the honest error `US-02-01`'s notes
+    call for, rather than silently ignoring it.
+    """
+    if speed != 1.0:
+        return make_response(
+            jsonify(
+                {
+                    "message": (
+                        f"Unsupported speed {speed!r}. This deployment cannot "
+                        "change playback speed; omit `speed` or set it to 1.0."
+                    )
+                }
+            ),
+            400,
+        )
+    return None
 
 
 CONFIG = yaml.load(open(CONFIG_FILE, "r"), Loader=yaml.SafeLoader)
@@ -271,6 +330,45 @@ class JobModel(BaseModel):
 
 class ErrorResponseModel(BaseModel):
     message: str
+
+
+class SpeechModel(BaseModel):
+    """``POST /v1/audio/speech`` request body.
+
+    Exactly the fields OpenAI's own spec defines (`DESIGN.md`, "Compatibility
+    target"): ``model``, ``input`` and ``voice`` required, ``response_format``
+    and ``speed`` optional. These are frozen by a specification this project
+    does not control; do not add or rename a field to dodge a warning or add
+    convenience (`DESIGN.md`, "Response shapes are a contract, at two
+    different strengths").
+    """
+
+    model: str = Field(
+        description=(
+            "Model identifier. Accepted for compatibility and otherwise "
+            "ignored: this deployment serves exactly one model."
+        )
+    )
+    input: str = Field(
+        description=(
+            "Text to synthesise. Longer than 4096 characters is rejected; "
+            "use POST /generate/long-form instead."
+        )
+    )
+    voice: str = Field(
+        description=(
+            "Name of one of this deployment's speaker WAV samples, as "
+            "published by GET /voices, with or without its .wav suffix."
+        )
+    )
+    response_format: str = Field(
+        default="mp3",
+        description="mp3 (default), opus, flac, wav, or pcm. aac is rejected.",
+    )
+    speed: float = Field(
+        default=1.0,
+        description="Only 1.0 (the default) is supported; any other value is rejected.",
+    )
 
 
 # Flask logging config
@@ -710,6 +808,37 @@ def wait_for_job(
         time.sleep(_WAIT_POLL_SECONDS)
 
 
+def _speech_response_for_outcome(
+    outcome: WaitOutcome, output_path: str, response_format: str
+) -> Response:
+    """Map a terminal ``wait_for_job`` outcome to the ``/v1/audio/speech`` response.
+
+    Every non-success outcome gets a documented status and an
+    ``ErrorResponseModel``-shaped body rather than an empty or truncated 200
+    (`CONTRIBUTING.md`, "Key design: async job queue", records the mapping and
+    the reasoning). The job itself is left untouched either way: this
+    function only builds a response, it never schedules, cancels, or expires
+    anything.
+    """
+    if outcome is WaitOutcome.SUCCEEDED:
+        result = _encode_speech_audio(output_path, response_format)
+        if isinstance(result, Response):
+            return result
+        data, content_type = result
+        return Response(data, mimetype=content_type)
+    if outcome is WaitOutcome.ERRORED:
+        return make_response(jsonify({"message": "Speech generation failed."}), 500)
+    if outcome is WaitOutcome.VANISHED:
+        return make_response(
+            jsonify({"message": "The job was deleted or expired before it finished."}),
+            500,
+        )
+    return make_response(
+        jsonify({"message": "Timed out waiting for speech generation to finish."}),
+        504,
+    )
+
+
 def _process_task(tts, task: dict):
     """Synthesise a single queued task with the given TTS model.
 
@@ -1009,6 +1138,59 @@ def post_generate_long_form(form: LongFormGenerationForm) -> Response:
         }
 
     return make_response(jsonify({"job_id": parent_job_id}), 201)
+
+
+@app.post(
+    "/v1/audio/speech",
+    summary="OpenAI-compatible text-to-speech.",
+    tags=[JOB_GENERATION_TAG],
+    responses={
+        200: {"content": {"audio/mpeg": {}}},
+        400: ErrorResponseModel,
+        500: ErrorResponseModel,
+        504: ErrorResponseModel,
+    },
+)
+def post_speech(body: SpeechModel) -> Response:
+    """OpenAI's ``POST /v1/audio/speech``, served as a blocking facade.
+
+    Enqueues a job on ``text_queue`` exactly as ``post_generate`` does, then
+    blocks on ``wait_for_job`` and returns audio bytes instead of a job id
+    (`DESIGN.md`, "The compatibility endpoint is a blocking facade"). No
+    second model instance, no new thread, no path around the queue.
+    """
+    error = _validate_speech_input(body.input)
+    if error is not None:
+        return error
+
+    voice_result = _resolve_voice(body.voice)
+    if isinstance(voice_result, Response):
+        return voice_result
+    speaker_wav = voice_result
+
+    if _RESPONSE_FORMATS.get(body.response_format) is None:
+        return _unsupported_response_format(body.response_format)
+
+    error = _validate_speech_speed(body.speed)
+    if error is not None:
+        return error
+
+    job_id = str(uuid.uuid4())
+    output_path = _get_filename(job_id)
+    word_count = _count_words(body.input)
+    register_job(job_id, kind="single", word_count=word_count)
+    text_queue.put(
+        {
+            "text": body.input,
+            "output_path": output_path,
+            "job_id": job_id,
+            "speaker_wav": speaker_wav,
+            "word_count": word_count,
+        }
+    )
+
+    outcome = wait_for_job(job_id, timeout_seconds=JOB_WAIT_TIMEOUT_SECONDS)
+    return _speech_response_for_outcome(outcome, output_path, body.response_format)
 
 
 @app.get(
