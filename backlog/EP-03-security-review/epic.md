@@ -7,7 +7,7 @@ branch: feat/EP-03-security-review
 depends_on:
 - EP-01
 - EP-02
-planning: pending
+planning: done
 review: pending
 ---
 
