@@ -61,7 +61,7 @@ The contract, from that source:
 |---|---|---|
 | `model` | yes | |
 | `input` | yes | Hard cap of 4096 characters upstream |
-| `voice` | yes | Maps onto this project's named WAV samples |
+| `voice` | yes | Names one of this project's WAV samples; see [How `voice` resolves onto a named sample](#how-voice-resolves-onto-a-named-sample) |
 | `response_format` | no | `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm` |
 | `speed` | no | |
 | `stream_format` | no | |
@@ -102,6 +102,69 @@ sending oversized input gets a documented `400` rather than a timeout. Callers
 with more text than that are pointed at `/generate/long-form`, which has no cap.
 
 Decided 2026-08-01.
+
+### How `voice` resolves onto a named sample
+
+`voice` names one of this deployment's own WAV samples — the ones `GET /voices`
+already publishes — and nothing else. There is no alias table, no fallback, and
+no case in which an unrecognised name quietly produces audio in a different
+voice.
+
+The rule, exactly:
+
+- **The candidate set is what `GET /voices` publishes**: the non-UUID `*.wav`
+  basenames in `OUTPUT_DIR`, as returned by `_list_speaker_wavs()`. The resolver
+  goes through that same function rather than globbing `OUTPUT_DIR` again, so the
+  endpoint and the listing cannot drift apart.
+- **The `.wav` suffix is optional.** A `voice` matches a candidate when it equals
+  that candidate's basename either with or without the suffix, so `rick` and
+  `rick.wav` both select `rick.wav`. Both spellings are accepted because both are
+  defensible: `voice` is an opaque identifier in the upstream dialect and never
+  carries a file extension there, while `GET /voices` publishes filenames. Every
+  candidate ends in `.wav` and they share one directory, so stems are unique
+  within the set and the mapping is unambiguous.
+- **Anything else is a `400` naming `GET /voices`.** That covers an unknown name,
+  an empty string, a name with a directory component, and an absolute path. A
+  rejection never falls back to `SPEAKER_WAV`, and nothing is enqueued.
+- **The value is a basename only** and cannot be walked out of `OUTPUT_DIR`,
+  matching how `post_generate` already sanitises `speaker_wav`.
+- **The configured default sample is selectable by name only when it lives in
+  `OUTPUT_DIR`**, which is the shipped arrangement (`SPEAKER_WAV=/workspace/speaker.wav`
+  inside `OUTPUT_DIR=/workspace`, so it is published as `speaker.wav`). A
+  deployment that points `SPEAKER_WAV` somewhere else has a default voice that no
+  `voice` value names. That is correct, not a hole: the candidate set is defined
+  as what `GET /voices` publishes.
+
+This is deliberately stricter than the native `speaker_wav` field, where an
+unknown basename falls back to the default sample silently. That native behaviour
+is the existing contract and is not changed by this decision. The asymmetry is
+intended: `/generate` is this project's own interface and may be forgiving, while
+the compatibility endpoint is reached by clients that cannot see the deployment
+and for which a wrong-but-successful synthesis is worse than a clear error.
+
+Rejected alternatives:
+
+- **A built-in alias table mapping the upstream stock names (`alloy`, `nova`, …)
+  onto local samples**, as openedai-speech did. Nothing gives such a table
+  authority, and it has no correspondence to whichever samples a given deployment
+  actually holds, so `voice: "nova"` would mean "whichever clone this table
+  happened to assign to it" — precisely the surprise a service built on named,
+  user-supplied clones must not produce.
+- **Ignoring `voice` and always synthesising with `SPEAKER_WAV`.** A client could
+  then never select a non-default clone through the compatibility endpoint, which
+  is the only reason to expose one.
+
+A deployer whose client hardcodes a stock name needs no code and no configuration
+for it: adding `workspace/alloy.wav` — a copy of a sample, or a symlink to one —
+makes `GET /voices` publish it and `voice: "alloy"` resolve, and it leaves the
+deployer, rather than this project, deciding which clone that name means.
+`README.md` documents that recipe.
+
+Decided 2026-09-06, resolving an escalation from T-02-02-01 against the open
+question raised 2026-08-01. The upstream contract this is compatible with is the
+same source as [Compatibility target](#compatibility-target) above, checked
+2026-08-01; no re-check was needed, because the decision constrains what this
+project accepts in the field rather than the field itself.
 
 ## Security model
 
@@ -549,9 +612,6 @@ escalate rather than guess.
   `test_lock_ordering.py` covers one historical deadlock by construction, not the
   general case. The compatibility facade makes this more pressing, since a
   blocking endpoint holds a request thread for the whole synthesis.
-- How does `voice` in the OpenAI dialect map onto this project's named WAV
-  samples? Standard clients send names like `alloy` and `nova`. Whether those
-  alias onto local samples, are rejected, or are ignored is undecided.
 - What does `response_format` do when the worker only produces WAV? Transcoding
   to `mp3` and `opus` needs a decision about whether ffmpeg becomes a dependency.
 

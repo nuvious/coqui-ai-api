@@ -39,8 +39,18 @@ without a working endpoint.
       convention every other section in that file uses (command, then exactly what
       comes back). The epic's sixth acceptance criterion is this one.
 - [ ] That section documents the `voice` mapping with a worked example — a real
-      basename from `GET /voices`, and what an unknown name returns (`US-02-02`
-      acceptance criteria).
+      basename from `GET /voices`, that the `.wav` suffix is optional, and what an
+      unknown name returns (`US-02-02` acceptance criteria). The rule is
+      `DESIGN.md`, "How `voice` resolves onto a named sample"; state it, do not
+      re-derive it.
+- [ ] It documents the escape hatch for clients that hardcode the upstream stock
+      voice names (`alloy`, `nova`, …), which those clients otherwise get a `400`
+      for: drop a `workspace/alloy.wav` — a copy of an existing sample, or a
+      symlink to one — and `GET /voices` publishes it and `voice: "alloy"`
+      resolves. No code and no configuration is involved. This was decided
+      2026-09-06 alongside the mapping rule, in preference to a built-in alias
+      table, precisely so the deployer chooses which clone the name means; say so
+      briefly rather than presenting it as a workaround.
 - [ ] It documents `response_format` as implemented: which values are served,
       what an unsupported one returns, and the default when the field is absent.
 - [ ] It says plainly that the request blocks for the length of the synthesis,

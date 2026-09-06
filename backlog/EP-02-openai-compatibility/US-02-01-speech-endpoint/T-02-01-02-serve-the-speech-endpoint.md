@@ -57,8 +57,11 @@ one worker, one queue".
       is accepted.
 - [ ] Empty `input` returns `400`, matching `post_generate`'s existing
       "Missing or empty text." behaviour rather than enqueuing silence.
-- [ ] An unresolvable `voice` returns the rejection T-02-02-01 produces, as a
-      `4xx` naming `GET /voices`, and enqueues nothing.
+- [ ] An unresolvable `voice` returns the rejection T-02-02-01 produces — `400`
+      with an `ErrorResponseModel`-shaped body naming `GET /voices` (`DESIGN.md`,
+      "How `voice` resolves onto a named sample") — and enqueues nothing. An empty
+      `voice`, a name with a directory component and an absolute path all take
+      that same path; none of them falls back to `SPEAKER_WAV`.
 - [ ] An unsupported `response_format` returns the rejection T-02-02-02 produces
       and enqueues nothing.
 - [ ] A `speed` value the worker cannot honour returns an error rather than being

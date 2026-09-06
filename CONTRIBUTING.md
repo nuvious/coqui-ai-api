@@ -525,7 +525,20 @@ call `estimator.predict(words)` to build the `/job/<id>/progress` ETA fields
 Named `.wav` files in the workspace that are not UUID-named (i.e. not job outputs)
 are treated as available voice samples and listed by `GET /voices`. The generation
 endpoints accept an optional `speaker_wav` field (basename) to override the default
-voice.
+voice; an unknown basename there falls back to `SPEAKER_WAV` silently, which is the
+native contract and does not change.
+
+**The compatibility endpoint's `voice` field resolves against the same set, and is
+deliberately stricter.** One resolver turns a `voice` value into a speaker WAV path
+or a rejection. It reads its candidates from `_list_speaker_wavs()` — never from a
+second glob of `OUTPUT_DIR`, so the resolver and `GET /voices` cannot drift apart —
+accepts a published basename with or without its `.wav` suffix (`rick` and
+`rick.wav` both select `rick.wav`), and rejects everything else with `400` and a
+message naming `GET /voices`: an unknown name, an empty string, a name carrying a
+directory component, an absolute path. It never falls back to `SPEAKER_WAV`, and a
+rejected request enqueues nothing. The rule and the reasoning behind it are in
+`DESIGN.md`, "How `voice` resolves onto a named sample"; the asymmetry between the
+two endpoints is intentional, so do not "fix" either one to match the other.
 
 Completed and errored jobs are purged automatically after `JOB_EXPIRATION_SECONDS`
 (default `300`; `<= 0` disables the mechanism entirely). `_schedule_expiration(job_id)`
