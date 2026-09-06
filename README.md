@@ -179,6 +179,100 @@ curl -X POST http://localhost:5000/generate/long-form \
 This returns a `job_id`; poll `/job/<id>/progress` until `status` is `done`, then
 download it from `/job/<id>`.
 
+#### OpenAI-compatible endpoint
+
+`POST /v1/audio/speech` serves OpenAI's own `/v1/audio/speech` dialect, so an
+off-the-shelf client already built against that API (for example,
+[Hermes' `base_url` override](https://hermes-agent.nousresearch.com/docs/user-guide/features/tts/))
+works against this service unmodified. Unlike `/generate`, it returns no job
+id: the request blocks until synthesis finishes and the response body is the
+audio itself.
+
+```bash
+curl -D - -X POST http://localhost:5000/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model": "tts-1", "input": "This is a test.", "voice": "rick"}' \
+  -o speech.mp3
+```
+
+```
+HTTP/1.1 200 OK
+Content-Type: audio/mpeg
+Content-Length: ...
+```
+
+`-D -` prints the response headers shown above; `-o speech.mp3` writes the
+audio bytes -- the actual response body -- to that file instead of dumping
+binary to the terminal.
+
+##### The `voice` field
+
+`voice` names one of this deployment's own samples: the same basenames
+`GET /voices` publishes, and nothing else. Given `GET /voices` lists `rick.wav`
+(from [voice cloning with a specific sample](#voice-cloning-with-a-specific-sample)
+above), both `"voice": "rick"` and `"voice": "rick.wav"` select it -- the
+`.wav` suffix is optional. A name `GET /voices` does not publish, including one
+of OpenAI's own stock voice names (`alloy`, `nova`, `shimmer`, ...), is
+rejected rather than falling back to the default sample:
+
+```json
+{"message": "Unknown voice. See GET /voices for available voices."}
+```
+
+with `400`, and nothing is enqueued.
+
+There is no built-in table mapping those stock names onto a sample. A deployer
+whose client hardcodes one needs no code and no configuration for it: drop
+`workspace/alloy.wav` -- a copy of an existing sample, or a symlink to one --
+and `GET /voices` publishes it like any other sample, after which
+`voice: "alloy"` resolves to it. This is deliberate, in preference to a
+built-in alias table, so that the deployer decides which of their own clones a
+stock name means, not this project.
+
+##### The `response_format` field
+
+| `response_format` | Served? | `Content-Type` |
+|---|---|---|
+| `mp3` (the default) | yes | `audio/mpeg` |
+| `opus` | yes | `audio/ogg` |
+| `flac` | yes | `audio/flac` |
+| `wav` | yes | `audio/wav` |
+| `pcm` | yes | `audio/pcm` |
+| `aac` | no | -- |
+
+Omitting `response_format` serves `mp3`, matching upstream's own default, so a
+client that never sets it gets what it would have gotten from OpenAI. `aac` is
+the one value this deployment cannot produce, and returns:
+
+```json
+{"message": "Unsupported response_format 'aac'. Supported values: mp3, opus, flac, wav, pcm."}
+```
+
+with `400`, rather than silently sending back a different format's bytes.
+`pcm` is the one exception to "every format is self-describing": it is raw,
+headerless 16-bit signed little-endian samples at the model's native sample
+rate (24 kHz mono for the shipped XTTS v2 configuration), so a client that
+requests it needs to already know that rate.
+
+##### Blocking, timeouts, and long input
+
+This endpoint holds the connection open for the full length of synthesis --
+there is no polling. The bound is `JOB_WAIT_TIMEOUT_SECONDS` (default `300`
+seconds); a request still running when that elapses gets a `504` rather than
+hanging indefinitely, and the job itself keeps running to completion rather
+than being cancelled. If holding a connection open for that long is not
+acceptable, use `POST /generate` plus `GET /job/<id>` (or
+`GET /job/<id>/progress`) instead, as in the walkthrough above.
+
+`input` longer than 4096 characters -- upstream's own hard cap on this field --
+is rejected the same way, before anything is enqueued:
+
+```json
+{"message": "input exceeds 4096 characters. Use POST /generate/long-form for longer text."}
+```
+
+with `400`; use [long-form generation](#long-form-generation) for text that size.
+
 #### Job expiration
 
 Finished and errored jobs are cleaned up automatically `JOB_EXPIRATION_SECONDS`

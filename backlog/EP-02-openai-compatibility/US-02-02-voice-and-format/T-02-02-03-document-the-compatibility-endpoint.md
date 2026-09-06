@@ -5,7 +5,7 @@ schema_version: '2'
 title: Document the compatibility endpoint and retire the deviation it closes
 epic: EP-02
 story: US-02-02
-status: todo
+status: done
 deps:
 - T-02-01-02
 scope:

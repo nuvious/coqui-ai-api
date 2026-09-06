@@ -671,9 +671,6 @@ Each needs a decision before anything acts on it.
   `CORS(app, **CONFIG.get("cors", {}))`, which with the shipped config allows all
   origins. The [Security model](#security-model) above describes the intent. The
   code does not implement any of it yet.
-- **There is no `/v1/audio/speech` endpoint.** The
-  [Compatibility target](#compatibility-target) above describes the intent. No
-  compatibility surface exists in the code yet.
 - **The runtime image's vulnerability surface has not been remeasured since the
   engine migration.** The existing figure — a Trivy scan of the old
   `TTS==0.22.0`-based image on 2026-07-30, finding **435 HIGH and 24 CRITICAL**
@@ -712,8 +709,13 @@ escalate rather than guess.
   owner.
 - Does the four-lock design hold under real concurrent load?
   `test_lock_ordering.py` covers one historical deadlock by construction, not the
-  general case. The compatibility facade makes this more pressing, since a
-  blocking endpoint holds a request thread for the whole synthesis.
+  general case. The compatibility facade (`POST /v1/audio/speech`) now exists
+  and blocks a request thread for the whole synthesis; exercising it in the test
+  suite (many single-threaded requests, plus a dedicated multi-threaded
+  `wait_for_job` lock-discipline test) surfaced no lock-ordering violation and no
+  deadlock (`CONTRIBUTING.md`, "Key design: async job queue", "Observed
+  concurrency note"). That is exercising under test, not a load test, so the
+  question of real concurrent load stands as it was.
 
 ## Future work
 

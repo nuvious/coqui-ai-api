@@ -17,6 +17,16 @@ The version itself lives in `pyproject.toml` and nowhere else; see
 
 ### Added
 
+- OpenAI-compatible endpoint: `POST /v1/audio/speech` is a blocking facade over
+  the existing job queue, so an off-the-shelf client built against OpenAI's own
+  `/v1/audio/speech` dialect (for example, Hermes via its `base_url` override)
+  works against this service unmodified. `voice` resolves against the same
+  named WAV samples `GET /voices` already publishes, with the `.wav` suffix
+  optional, and an unrecognised name (including OpenAI's own stock voice names)
+  returns a documented `400` naming `GET /voices` rather than a silent
+  fallback. `response_format` serves `mp3` (the default), `opus`, `flac`,
+  `wav`, and `pcm`; `aac` returns a documented `400`. `input` over 4096
+  characters is rejected the same way, naming `/generate/long-form`.
 - Long-form generation: `POST /generate/long-form` accepts a plain-text file,
   splits it into sentences, synthesises each in order, and concatenates the
   segments into a single WAV.

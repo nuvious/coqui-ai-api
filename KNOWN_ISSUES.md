@@ -62,4 +62,7 @@ deviations" or "Open questions". This file is the short list.
   design decision for a single-process self-hosted service, not a defect, but it
   surprises people who expect jobs to survive a restart.
 - **Concurrency under real load is unproven.** `tests/test_lock_ordering.py`
-  covers one historical deadlock by construction, not the general case.
+  covers one historical deadlock by construction, not the general case. The
+  blocking `POST /v1/audio/speech` facade now exists and holds a request thread
+  for the whole synthesis; exercising it under the test suite surfaced no
+  lock-ordering violation, but that is not a load test.
