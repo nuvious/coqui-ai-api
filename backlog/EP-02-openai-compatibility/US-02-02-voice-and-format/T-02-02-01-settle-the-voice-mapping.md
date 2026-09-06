@@ -5,7 +5,7 @@ schema_version: '2'
 title: Settle and implement how voice maps onto the named WAV samples
 epic: EP-02
 story: US-02-02
-status: blocked
+status: todo
 deps: []
 scope:
 - src/coqui_ai_api/app.py
