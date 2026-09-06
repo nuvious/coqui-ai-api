@@ -25,8 +25,10 @@ The version itself lives in `pyproject.toml` and nowhere else; see
   optional, and an unrecognised name (including OpenAI's own stock voice names)
   returns a documented `400` naming `GET /voices` rather than a silent
   fallback. `response_format` serves `mp3` (the default), `opus`, `flac`,
-  `wav`, and `pcm`; `aac` returns a documented `400`. `input` over 4096
-  characters is rejected the same way, naming `/generate/long-form`.
+  `wav`, and `pcm`; `aac` returns a documented `400`. `speed` accepts only its
+  own default, `1.0`; any other value returns a documented `400`, since this
+  deployment has no playback-speed control. `input` over 4096 characters is
+  rejected the same way, naming `/generate/long-form`.
 - Long-form generation: `POST /generate/long-form` accepts a plain-text file,
   splits it into sentences, synthesises each in order, and concatenates the
   segments into a single WAV.

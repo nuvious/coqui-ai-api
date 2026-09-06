@@ -63,8 +63,8 @@ The contract, from that source:
 | `input` | yes | Hard cap of 4096 characters upstream |
 | `voice` | yes | Names one of this project's WAV samples; see [How `voice` resolves onto a named sample](#how-voice-resolves-onto-a-named-sample) |
 | `response_format` | no | `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`; this deployment serves every value but `aac`, see [What `response_format` serves, and what it rejects](#what-response_format-serves-and-what-it-rejects) |
-| `speed` | no | |
-| `stream_format` | no | |
+| `speed` | no | This deployment accepts only `1.0`; see [Why `speed` accepts only `1.0`](#why-speed-accepts-only-10) |
+| `stream_format` | no | Not served: streaming is deliberately deferred for this epic (`epic.md`, "Constraints on scope"); accepted and silently ignored rather than rejected |
 
 The response is binary audio, not JSON. The upstream specification declares the
 response body as `application/octet-stream`; this project sends the specific
@@ -266,6 +266,32 @@ default come from the same source as
 format support was checked against the installed `soundfile` 0.13.1 /
 libsndfile 1.2.2 on 2026-09-06 by encoding each format and inspecting the
 resulting bytes.
+
+### Why `speed` accepts only `1.0`
+
+`speed` is optional upstream and defaults to `1.0`. This deployment serves
+exactly that one value and rejects every other with a `400` naming the
+restriction: the worker has no playback-speed control to apply a different
+value against. `_process_task` forwards only `text`, `file_path` and
+`speaker_wav` to `tts_to_file`, so there is no mechanism a non-default `speed`
+could drive. Accepting one and silently ignoring it would be the same
+wrong-but-successful response that
+[voice](#how-voice-resolves-onto-a-named-sample) and
+[`response_format`](#what-response_format-serves-and-what-it-rejects) above
+both refuse for the same reason: a client that cannot see the deployment must
+get a clear error, not audio at the wrong speed.
+
+This is a full, symmetric rejection of the field's range, not a partial
+implementation. Revisiting it means adding actual playback-speed control to
+the worker, not widening the set of values this validation accepts.
+
+Decided 2026-09-05, when `US-02-02` was decomposed into tasks and
+`T-02-01-02` was given this behaviour as an acceptance criterion, ahead of the
+endpoint existing to implement it. The upstream field and its default come
+from the same source as [Compatibility target](#compatibility-target),
+checked 2026-08-01. `CONTRIBUTING.md`, "Key design: async job queue", records
+the worker-side reasoning this decision rests on and points back here rather
+than restating it.
 
 ## Security model
 

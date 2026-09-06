@@ -585,14 +585,9 @@ machinery's job like any other job (`_process_task` already calls
 whether a compatibility caller is still waiting).
 
 **`speed` accepts exactly `1.0` (the default) and rejects everything else with a
-`400`.** The worker has no playback-speed control — `_process_task` forwards only
-`text`, `file_path` and `speaker_wav` to `tts_to_file` — so there is no mechanism to
-honour a different value against. `1.0` is upstream's own default and means "no
-change," which is the one case that needs no mechanism at all; every other value
-would have to be silently ignored to accept it, and `US-02-01`'s notes are explicit
-that an honest error beats that. This is a full, symmetric rejection of the field's
-range rather than a partial implementation: revisiting it means adding actual
-speed control to the worker, not widening the accepted set here.
+`400`.** `_validate_speech_speed` is the implementation; the product decision and
+why it is a full rejection rather than a partial one lives in `DESIGN.md`, "Why
+`speed` accepts only `1.0`" — state it there, do not re-derive it here.
 
 **Observed concurrency note (`DESIGN.md`, "Open questions"):** exercising this
 route in the test suite (many single-threaded requests, plus the dedicated

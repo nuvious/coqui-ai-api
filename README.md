@@ -254,6 +254,26 @@ headerless 16-bit signed little-endian samples at the model's native sample
 rate (24 kHz mono for the shipped XTTS v2 configuration), so a client that
 requests it needs to already know that rate.
 
+##### The `speed` field
+
+This deployment has no playback-speed control, so `speed` accepts only its
+own default, `1.0`. Omitting it, or sending `1.0` explicitly, works; any other
+value is rejected before anything is enqueued:
+
+```bash
+curl -X POST http://localhost:5000/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -d '{"model": "tts-1", "input": "This is a test.", "voice": "rick", "speed": 1.25}'
+```
+
+```json
+{"message": "Unsupported speed 1.25. This deployment cannot change playback speed; omit `speed` or set it to 1.0."}
+```
+
+with `400`. A client that sets `speed` to anything but `1.0` should treat
+this the same way it would treat an unsupported `response_format`: a
+documented limitation of this deployment, not a bug to retry past.
+
 ##### Blocking, timeouts, and long input
 
 This endpoint holds the connection open for the full length of synthesis --
