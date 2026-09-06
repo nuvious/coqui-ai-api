@@ -5,7 +5,7 @@ schema_version: '2'
 title: Block on a queued job until it reaches a terminal state
 epic: EP-02
 story: US-02-01
-status: todo
+status: blocked
 deps: []
 scope:
 - src/coqui_ai_api/app.py
