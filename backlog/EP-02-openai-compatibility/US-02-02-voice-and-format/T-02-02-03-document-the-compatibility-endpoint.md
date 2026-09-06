@@ -5,7 +5,7 @@ schema_version: '2'
 title: Document the compatibility endpoint and retire the deviation it closes
 epic: EP-02
 story: US-02-02
-status: done
+status: reopened
 deps:
 - T-02-01-02
 scope:
@@ -122,3 +122,31 @@ Documentation only; do not change any code in src/ or tests/, and do not change 
 3. Consider whether the CHANGELOG.md entry, which already enumerates the `voice` and `response_format` rules, should also mention that `speed` accepts only 1.0. It is the same class of user-visible restriction as the `aac` rejection it already lists. Your judgement; keep the entry in the file's existing Keep a Changelog voice either way.
 
 What is already correct and must not be re-litigated: the `voice` rule, the `response_format` set and its `mp3` default, the deletion of the "no `/v1/audio/speech` endpoint" deviation, the retirement of both answered open questions, the restatement of the concurrency open question, and the KNOWN_ISSUES.md/DESIGN.md agreement on the three transformers advisories. All of those were checked and are right. `make verify` must still pass when you are done.
+
+## Review notes
+
+Documentation only. Do not change any code in src/ or tests/, do not change the endpoint's behaviour, and do not touch the Dockerfile, docker-compose.yaml, pyproject.toml, uv.lock or the Makefile -- all are outside your scope. The user guide currently promises timeout behaviour the shipped deployment cannot deliver.
+
+THE FACTS, ALL VERIFIED BY RUNNING IT, NOT BY READING:
+
+The Dockerfile ends with ENTRYPOINT ["gunicorn"] / CMD ["--bind", "0.0.0.0:5000", "coqui_ai_api.app:app"] -- no --timeout, no --workers, no --threads. docker-compose.yaml declares no `command:`, so the documented deploy path uses exactly those flags. gunicorn 23.0.0's defaults are therefore in force: timeout=30 seconds, workers=1, worker_class=sync, threads=1 (confirmed via gunicorn.config.Config()).
+
+Running the real app under real gunicorn with those exact flags, with a synthesis that takes 45 seconds:
+  - At 31 seconds the arbiter logged '[CRITICAL] WORKER TIMEOUT (pid:...)' and killed the worker.
+  - The client received 500 with Content-Type text/html (a generic 'Internal Server Error' page), NOT the documented 504 with an ErrorResponseModel JSON body, and NOT after 300 seconds.
+  - gunicorn then booted a replacement worker process. In the shipped image that discards the whole in-memory job registry (DESIGN.md, 'State is in memory, and that is accepted') and forces the multi-gigabyte XTTS model to reload, so every other job's state is lost too.
+  - Separately: while a compat synthesis is in flight, GET /health returned nothing at all (curl exited 000 after an 8-second bound), because the single sync worker is occupied. Every other route -- /health, /ready, /job/<id>/progress, DELETE /job/<id> -- is stalled for the duration, so a container healthcheck or liveness probe fires mid-synthesis.
+
+XTTS-v2 takes well over 30 seconds for anything beyond a short sentence, so this is the ordinary path for real input, not an edge case.
+
+WHAT TO FIX, IN THREE PLACES:
+
+1. README.md, 'OpenAI-compatible endpoint', the 'Blocking, timeouts, and long input' subsection. It currently says: 'The bound is `JOB_WAIT_TIMEOUT_SECONDS` (default `300` seconds); a request still running when that elapses gets a `504` rather than hanging indefinitely, and the job itself keeps running to completion rather than being cancelled.' The 504-after-300-seconds half is true only when the app is run without gunicorn's default timeout in front of it, which is not how the documented docker-compose deployment runs. Rewrite so a user learns the effective ceiling for the shipped image is gunicorn's 30-second default, what they actually receive when it trips (a 500 HTML error page and a restarted worker, losing in-memory job state), and what to do about it -- concretely, that a deployer whose synthesis exceeds 30 seconds must raise gunicorn's --timeout (and should consider --threads) via the container command, and that JOB_WAIT_TIMEOUT_SECONDS only has effect below whatever gunicorn's bound is. Also state plainly that this endpoint occupies the single default sync worker for the whole synthesis, so other requests including /health do not get served meanwhile. Keep the file's existing voice: command, then exactly what comes back. Where you show the 504, make clear which configuration produces it.
+
+2. DESIGN.md, 'Known deviations'. Add an entry recording that the shipped gunicorn configuration's 30-second default timeout is lower than JOB_WAIT_TIMEOUT_SECONDS's 300-second default, so the blocking facade's documented 504 path is unreachable as shipped, and that a single default sync worker serialises the entire API for the length of a synthesis. Write it as a deviation between intent and what ships, in the style the section already uses (what is true, why it is recorded rather than fixed here, and what would resolve it), and say explicitly that resolving it -- changing the gunicorn CMD, or lowering the default bound -- is a maintainer decision that has not been taken. Do NOT decide it yourself and do NOT propose one option as settled; this task records the gap, it does not close it.
+
+3. CONTRIBUTING.md, 'Key design: async job queue'. The 'Observed concurrency note' currently reports that exercising the route surfaced no four-lock violation and no deadlock. That is accurate but is only about in-process lock ordering under the Flask test client, and as written it reads as general reassurance about the blocking facade's behaviour under a real server. Add a sentence bounding the claim -- it was observed in-process with the test client, not under gunicorn -- and point at the new DESIGN.md deviation entry for the deployment-level consequence. Do not restate the deviation's reasoning here; point at it, matching how response_format is handled ('state it, do not re-derive it').
+
+Also consider, your judgement: KNOWN_ISSUES.md's concurrency bullet already says 'exercising it under the test suite surfaced no lock-ordering violation, but that is not a load test'. It is the readable copy of the DESIGN.md open questions and deviations, so a one-line mention of the gunicorn timeout mismatch likely belongs there too. Keep it short and in the file's existing voice.
+
+WHAT IS ALREADY CORRECT AND MUST NOT BE RE-LITIGATED: the voice rule, the response_format set and its mp3 default, the speed decision and its DESIGN.md section (added in the previous round -- it is right), the stream_format row, the deletion of the 'no /v1/audio/speech endpoint' deviation, the retirement of both answered open questions, the README curl and its response block, and the KNOWN_ISSUES.md/DESIGN.md agreement on the three transformers advisories. All were checked this round and are correct. make verify must still pass when you are done.
