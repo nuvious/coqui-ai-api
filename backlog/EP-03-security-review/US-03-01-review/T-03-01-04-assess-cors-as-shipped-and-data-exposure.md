@@ -5,7 +5,7 @@ schema_version: '2'
 title: Assess CORS as it ships and what the service discloses
 epic: EP-03
 story: US-03-01
-status: todo
+status: done
 deps:
 - T-03-01-03
 scope:

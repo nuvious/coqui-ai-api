@@ -903,3 +903,494 @@ reachable by any caller); and any change to `src/`, `tests/`, or the
 specification documents — this task adds a cap, a `MAX_CONTENT_LENGTH`, or a
 queue bound to nothing. `DESIGN.md` and `KNOWN_ISSUES.md` are not edited
 here; `US-03-02` owns deciding what to do with F-08 through F-11 above.
+
+## CORS as it ships
+
+`app.py:288` is `CORS(app, **CONFIG.get("cors", {}))`. This section measures
+what that call actually does with the shipped configuration, against the
+installed `flask-cors` version, rather than against what an operator could
+configure.
+
+**Installed version:** `flask-cors` **6.0.1** (pinned exactly in
+`pyproject.toml`: `flask-cors==6.0.1`; confirmed installed via
+`importlib.metadata.version("flask-cors")`). `flask_cors.CORS`'s own
+docstring (`flask_cors/extension.py`) states the defaults this measurement
+confirms: `origins` default `'*'`, `supports_credentials` default `False`,
+`send_wildcard` default `False`.
+
+Every claim below was produced by running the app under
+`COQUI_AI_API_START_WORKER=0` against a throwaway `OUTPUT_DIR`, using the
+Flask test client — the same harness the earlier sections of this report
+used. The probe script lived at `/tmp/t030104_probe*.py`, outside the
+repository, and was deleted once its output was captured; `git status` shows
+no changes from writing this section.
+
+### Both shipped config paths, checked
+
+Neither shipped config file sets a `cors` key — `config.yaml.example` ships
+it present but commented out, and the repository's own `workspace/config.yaml`
+never mentions it at all:
+
+```
+$ uv run python -c "
+import yaml
+for f in ['config.yaml.example', 'workspace/config.yaml']:
+    d = yaml.safe_load(open(f))
+    print(f, '=>', 'cors' in d, d.get('cors', '<absent>'))
+"
+config.yaml.example => False <absent>
+workspace/config.yaml => False <absent>
+```
+
+`CONFIG.get("cors", {})` therefore evaluates to `{}` for both files alike, so
+`CORS(app, **CONFIG.get("cors", {}))` is `CORS(app)` — the library's own
+default — under either one. There is no configuration difference between the
+two to disclose; both produce the identical result measured below, confirmed
+directly by pointing `CONFIG_FILE` at each in turn and repeating the same
+`Origin`-bearing request:
+
+```
+$ CONFIG_FILE=config.yaml.example ... => 200 ACAO=http://evil.example ACAC=None
+$ CONFIG_FILE=workspace/config.yaml ... => 200 ACAO=http://evil.example ACAC=None
+```
+
+**Which one a default deployment runs with:** `docker-compose.yaml` mounts
+`./workspace:/workspace` and sets no `CONFIG_FILE` environment variable, so
+the app's own default (`CONFIG_FILE = os.getenv("CONFIG_FILE",
+"/workspace/config.yaml")`, `app.py:35`) resolves inside the container to
+`/workspace/config.yaml` — which the volume mount makes the repository's own
+`workspace/config.yaml`, not `config.yaml.example`. A default `docker compose
+up` therefore runs with the repository's own file, and (per the identical
+result above) that changes nothing about the CORS outcome either way.
+
+### What the default does, measured against a running request
+
+`GET /` and `GET /voices`, each sent with `Origin: http://evil.example`:
+
+```
+GET / :
+  200
+  Access-Control-Allow-Origin => http://evil.example
+  Access-Control-Allow-Credentials => None (header absent)
+  Vary => Origin
+
+GET /voices :
+  200
+  Access-Control-Allow-Origin => http://evil.example
+  Access-Control-Allow-Credentials => None (header absent)
+  Vary => Origin
+```
+
+`Access-Control-Allow-Origin` **reflects the request's `Origin` header
+verbatim** rather than sending a literal `*`. This is `flask-cors`
+`send_wildcard=False`'s documented behaviour applied to an `origins='*'`
+configuration: when the origin set is the wildcard and `send_wildcard` is
+off, the library still allows every origin, but it echoes back whichever one
+the client sent instead of the literal string — which is why this measured
+as `http://evil.example`, an arbitrary, previously-unseen origin, and would
+measure as any other origin sent in its place. `Access-Control-Allow-Credentials`
+is never sent (`supports_credentials` defaults `False`), and `Vary: Origin`
+is sent (`vary_header` defaults `True`).
+
+A preflight `OPTIONS`, sent for a `POST /generate` with a JSON body and for a
+`DELETE /job/<id>` (both cases where the actual browser request needs a
+passing preflight before it is ever sent — see [the gap against the Security
+model](#the-gap-against-the-security-model-cors-denies-by-default), below):
+
+```
+OPTIONS /generate  (Origin: http://evil.example,
+                     Access-Control-Request-Method: POST,
+                     Access-Control-Request-Headers: Content-Type)
+  200
+  Access-Control-Allow-Origin => http://evil.example
+  Access-Control-Allow-Methods => DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT
+  Access-Control-Allow-Headers => Content-Type
+  Access-Control-Allow-Credentials => None (header absent)
+  Vary => Origin
+  body: b''
+
+OPTIONS /job/somejob  (Origin: http://evil.example,
+                        Access-Control-Request-Method: DELETE)
+  200
+  Access-Control-Allow-Origin => http://evil.example
+  Access-Control-Allow-Methods => DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT
+  Access-Control-Allow-Credentials => None (header absent)
+```
+
+The preflight succeeds for every method registered on the route (`methods`
+defaults to `[GET, HEAD, POST, OPTIONS, PUT, PATCH, DELETE]`) and for
+whatever request headers the caller asks for (`allow_headers` defaults `'*'`,
+reflected here as the literal `Content-Type` requested) — there is no
+narrower allowlist anywhere in the shipped configuration for either the
+origin, the method, or the header set.
+
+### The gap against the Security model ("CORS denies by default")
+
+`DESIGN.md`, "Security model" states the intent — "CORS denies by default"
+— and already calls the shipped `CORS(app, **CONFIG.get("cors", {}))`
+default a defect rather than a configuration choice. This section states the
+gap concretely, in terms of what a page on an arbitrary origin can do, rather
+than re-arguing that it is a defect.
+
+**The credential question changes the shape of the impact, and must be
+stated rather than glossed.** The classic reason CORS defends a browser
+client is that browsers *automatically* attach an ambient credential — a
+cookie — to a cross-origin request, so a permissive CORS default lets a
+malicious page ride a victim's already-authenticated session. That mechanism
+does not exist here at all today: `DESIGN.md`'s own security model specifies
+`Authorization: Bearer <token>`, not a cookie, and (per `T-03-01-01`'s grep
+for `Authorization` over `src/`, reconfirmed here) nothing in the code checks
+any credential yet regardless of transport. There is, right now, no
+credential of any kind for a browser to attach ambiently, so today's
+permissive CORS is not "stealing a logged-in victim's session" — there is no
+session. **Even once bearer-token authentication lands, this remains true in
+one respect**: unlike a cookie, a browser never attaches an
+`Authorization` header to a cross-origin request on its own initiative — a
+page's own JavaScript would have to already know the token and set the
+header explicitly, which is a different (and much narrower) threat than
+classic cookie-riding CSRF. So permissive CORS is not, and will not become,
+a way to silently ride a bearer credential the way it would a cookie.
+
+What permissive CORS *does* enable today, with zero authentication of any
+kind on any route, is different: it removes the one browser-enforced barrier
+that would otherwise require a request to originate from this application's
+own origin, turning **any caller with a browser tab open to any other
+website** into a path onto this API, provided that browser can reach the
+API's host and port at all (i.e., the victim is on the same network as the
+deployment — precisely the "trusted LAN" scenario `DESIGN.md`'s purpose
+section describes this service as living on). Concretely, naming the routes:
+
+- **`GET /voices`, `GET /ready`** — both are "simple" `GET` requests; a
+  cross-origin page's script can send them and, because
+  `Access-Control-Allow-Origin` reflects any origin, **read** the JSON
+  response — the voice-sample enumeration (see [Data
+  exposure](#data-exposure), below) and the worker/queue state, from any
+  page a LAN visitor happens to have open, with no interaction beyond
+  loading that page.
+- **`GET /job/<job_id>`** — likewise a simple, readable `GET`; a page that
+  already knows or guesses a `job_id` can read the resulting audio bytes
+  cross-origin.
+- **`POST /generate`, `POST /generate/long-form`, `POST /v1/audio/speech`**
+  — a JSON (or, for the long-form endpoint, multipart) body is not a
+  "simple" content type, so the browser preflights with `OPTIONS` first, as
+  measured above. Because the preflight is unconditionally granted for
+  every method and header, the browser proceeds to send the real request:
+  a cross-origin page can make a victim's browser **enqueue an arbitrary
+  synthesis job** against this deployment's single worker (`DESIGN.md`,
+  "One model, one worker, one queue") — compounding directly with F-08/F-09's
+  amplification and F-10's absent rate limiting, now triggerable by loading
+  any page rather than by calling the API directly — and can read the
+  `job_id` back from the (CORS-readable) JSON response to continue
+  interacting with that job.
+- **`DELETE /job/<job_id>`** — `DELETE` is never a "simple" method, so this
+  is preflight-gated the same way; the preflight is granted the same way.
+  A page that supplies a `job_id` matching an existing file's basename can
+  delete it via the victim's browser — including, per F-06 above, a named
+  voice sample rather than an actual job.
+
+In short: today's total absence of authentication already means every one
+of these actions is reachable by *any* direct caller (`T-03-01-01`'s
+finding); what the permissive CORS default adds on top is that a browser
+sitting on the same network — with no direct network route of its own for
+an outside attacker to use — becomes a proxy for those same actions,
+without a passing preflight not even being asked to name a specific,
+approved origin. The intended fix (an explicit allowlist, `DESIGN.md`'s
+stated intent) does not change any of the authentication story above; it
+only removes the browser-as-relay path this measurement demonstrates. Fixing
+it is out of this task's scope (`US-03-01`, epic `EP-03`, "Constraints on
+scope": the epic implements nothing).
+
+### The `DESIGN.md` deviation's stale line number
+
+`DESIGN.md`, "Known deviations" points at `app.py:142` for the
+`CORS(app, **CONFIG.get("cors", {}))` call. That figure is already recorded
+as stale in this report — **F-01**, above — which found the real line to be
+`app.py:288`. Reconfirmed here rather than duplicated:
+
+```
+$ grep -n "^CORS(app" src/coqui_ai_api/app.py
+288:CORS(app, **CONFIG.get("cors", {}))
+```
+
+### Findings: CORS
+
+Numbering continues from `F-11` above.
+
+#### F-12: CORS ships allowing every origin, every method and every header, on every route, under both shipped config files
+
+**Severity:** High — exploitable today without a credential (there is none
+to carry, per `T-03-01-01`), for unauthorized disclosure (voice-sample
+enumeration, worker/queue state, job audio) and unauthorized disruption
+(arbitrary job creation compounding with F-08/F-09/F-10, arbitrary job/voice
+deletion compounding with F-06) via any browser on the same network as the
+deployment — not full host compromise, but real unauthorized access and
+disruption reachable with nothing more than a victim loading an untrusted
+page, matching this report's "High" tier exactly. Not "Critical": nothing
+here reaches the host itself or a class of data outside what `T-03-01-01`
+through `T-03-01-03`'s findings already establish is reachable by a direct,
+unauthenticated caller.
+
+**Reproduction:** `GET /` with `Origin: http://evil.example` against either
+shipped config (`config.yaml.example` or `workspace/config.yaml`, both
+verified above to omit a `cors` key) returns
+`Access-Control-Allow-Origin: http://evil.example` (the request's own origin,
+reflected) and no `Access-Control-Allow-Credentials` header; `OPTIONS
+/generate` with `Access-Control-Request-Method: POST` returns
+`Access-Control-Allow-Methods: DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT`
+and `Access-Control-Allow-Headers: Content-Type` (whatever was requested).
+Installed `flask-cors` version: `6.0.1` (`importlib.metadata.version
+("flask-cors")`).
+
+## Data exposure
+
+What this service discloses to an unauthenticated caller, beyond the
+route-by-route gap already recorded in the [route
+enumeration](#route-enumeration) above. Each item below is one of this
+task's named data-exposure surfaces.
+
+### Job ids
+
+`job_id = str(uuid.uuid4())` (`app.py:1003` in `post_generate`, and the
+matching call in `post_generate_long_form`) is the only value that
+distinguishes one caller's job — and its resulting audio — from another's;
+nothing else is checked (`T-03-01-01`'s finding: no route checks a
+credential). **Knowing a job's id is, precisely, the only thing standing
+between a caller and that job's audio**: `GET /job/<job_id>` (per the route
+enumeration) checks only `os.path.isfile` on the path `job_id` builds, with
+no ownership or session concept anywhere in the codebase.
+
+Whether that id is *guessable* is a separate question from whether it is
+the sole gate, and the answer differs: UUIDv4 carries 122 bits of random
+entropy, so blind brute-forcing one is not practical. But the id is not
+kept secret in any other sense — it is returned in the plaintext JSON body
+of the `201` response to the very request that created the job, with no
+transport requirement (`CONTRIBUTING.md` and `README.md` show the API
+served over plain `http://` in every example), so it is exposed to anything
+that can observe that response: a shared link, a proxy or CDN access log, a
+misdirected copy-paste, or (per [F-12](#f-12-cors-ships-allowing-every-origin-every-method-and-every-header-on-every-route-under-both-shipped-config-files)
+above) a cross-origin page the *creating* caller's own browser was also
+running at the time. There is no secondary factor — no owner check, no
+per-session scoping — that would still protect the job if the id alone
+ever reaches a second party by any of those paths.
+
+### `GET /voices` as an enumeration of workspace filenames
+
+`GET /voices` returns `_list_speaker_wavs()` verbatim — every `*.wav`
+basename in `OUTPUT_DIR` whose name does not parse as a UUID (`app.py:131-140`).
+Against the repository's own `workspace/` directory, that is:
+
+```
+$ ls workspace/*.wav
+workspace/genn.wav  workspace/mrmeeseeks.wav  workspace/rick.wav  workspace/speaker.wav
+
+$ GET /voices  =>  200 {"voices": ["genn.wav", "mrmeeseeks.wav", "rick.wav", "speaker.wav"]}
+```
+
+confirmed directly against a throwaway `OUTPUT_DIR` seeded with copies of
+those four names. This route requires no credential
+(`T-03-01-01`'s finding) and, per F-12 above, its response is readable
+cross-origin by any page on the same network. The names are operator- or
+uploader-chosen — they are exactly the filenames someone placed in
+`OUTPUT_DIR` to name a cloned voice, which for a self-hosted voice-cloning
+service is itself potentially identifying information about whose voice was
+cloned (a person's name, an initialism, a project codename), disclosed in
+full to any caller with no restriction beyond reaching the port.
+
+### `OUTPUT_DIR` holding voice samples and job outputs in one directory with one naming rule
+
+Voice samples (what `GET /voices` publishes) and job outputs (each job's
+synthesized audio) are written to, and read from, the **same directory**
+(`OUTPUT_DIR`), distinguished by **exactly one rule**: does the basename
+parse as a `uuid.UUID`. Demonstrated directly: seeding a throwaway
+`OUTPUT_DIR` with the four real voice-sample names above, then dropping in
+one `<uuid>.wav` file the same way the worker names a completed job's
+output:
+
+```
+Before a job output lands: ['genn.wav', 'mrmeeseeks.wav', 'rick.wav', 'speaker.wav']
+After one lands:           ['e7c81f2a-5846-4b54-947d-3f534025530f.wav',
+                             'genn.wav', 'mrmeeseeks.wav', 'rick.wav', 'speaker.wav']
+
+GET /voices => {"voices": ["genn.wav", "mrmeeseeks.wav", "rick.wav", "speaker.wav"]}
+```
+
+the UUID-named file is silently excluded from the listing, exactly as
+designed (`DESIGN.md`, "How `voice` resolves onto a named sample": the
+candidate set is what `GET /voices` publishes). This is the same UUID rule
+already reported from two other angles in this story — `T-03-01-02`'s
+finding that `_list_speaker_wavs()`, `_sweep_orphan_wavs()` and
+`_expire_job()`/`delete_job()` do not all apply it consistently
+([F-06](#f-06-delete-jobid-deletes-any-file-in-output_dir-named-idwav-including-a-named-voice-sample-that-was-never-a-job),
+[F-07](#f-07-job_id-reaches-_get_filename-with-no-validation-at-all-today-s-immunity-to-traversal-is-werkzeug-s-routing-not-this-code)
+above) — cross-referenced rather than re-filed here. The data-exposure angle
+this section adds: a voice sample is not disposable the way a job output
+is (`DESIGN.md`, "State is in memory, and that is accepted" treats job
+state, including its WAV, as expected to be lost; a voice sample is a
+deliberately persisted, operator-supplied asset, arguably biometric data),
+yet nothing about where it lives, how it's named, or what reads it treats
+it any differently from a job's disposable output — the sole thing
+protecting a voice sample from `_sweep_orphan_wavs()`'s startup deletion, or
+from `DELETE /job/<id>` per F-06, is that its basename happens not to parse
+as a UUID.
+
+### `GET /ready`'s queue depth
+
+`GET /ready` (`app.py:974-984`) returns `queue_depth: text_queue.qsize()`
+with no credential check (`T-03-01-01`'s finding) and no exemption in
+`DESIGN.md`'s security model (only `/health` is listed as exempt).
+Demonstrated directly: three items placed on `text_queue` (with the worker
+not running, so nothing drains them) are reflected exactly:
+
+```
+$ (queue has 3 items, worker not running)
+GET /ready => 503 {"model": "loading", "queue_depth": 3, "worker": "dead"}
+```
+
+This discloses live operational state — how much work is queued, whether
+the model has finished loading, whether the worker thread is alive — to any
+caller, which is reconnaissance value for timing an attack (e.g., knowing
+the queue is already deep before adding F-08/F-09's amplification, or
+knowing the worker just restarted and is mid-load) even though the endpoint
+itself performs no action.
+
+### The OpenAPI documentation routes publish the full surface
+
+The `flask-openapi3` documentation blueprint (`/openapi/openapi.json`,
+plus every UI variant already listed in the [route
+enumeration](#route-enumeration)'s "Framework-provided routes" table) serves
+the complete, machine-readable API description with no credential check.
+Measured directly:
+
+```
+$ GET /openapi/openapi.json => 200
+  paths: 9   components.schemas: 8
+  paths: /, /generate, /generate/long-form, /health, /job/{job_id},
+         /job/{job_id}/progress, /ready, /v1/audio/speech, /voices
+```
+
+Every request and response field this project defines — including the
+exact `pydantic` model shapes behind `JobGenerationModel`,
+`LongFormGenerationForm`, and the rest — is disclosed verbatim to an
+unauthenticated caller, alongside the six interactive documentation UIs
+(Swagger, ReDoc, RapiDoc, RapiPDF, Elements, Scalar) that render it. This is
+a smaller exposure than it would be for a closed-source service — the
+schemas mirror the project's own, publicly-readable source — but it still
+hands an unauthenticated caller a complete, precise map of every field name,
+type and constraint with zero effort, which the source code alone requires
+actually reading to reconstruct.
+
+### `app.logger.info(f"Text: {body.text}")` writes the caller's full submitted text to stdout
+
+`post_generate` (`app.py:997`) logs the entire, unbounded, unredacted
+`text` field of every request at `INFO` level before validating it, via the
+application's own logging configuration (`dictConfig` at `app.py:375-392`),
+which routes the root logger's `INFO`-level records to a `StreamHandler`
+writing to `sys.stdout` — i.e., in the shipped deployment, straight to the
+container's log stream. Demonstrated directly, capturing the app's logger
+output the same way that handler would:
+
+```
+$ POST /generate {"text": "please read this back to me: super secret patient diagnosis details 12345"}
+  status: 201
+  log captured:
+  [2026-09-06 23:42:24,893] INFO in app: Text: please read this back to me: super secret patient diagnosis details 12345
+```
+
+No credential is required to reach this line (`T-03-01-01`'s finding), and
+nothing bounds the length of what gets logged (`T-03-01-03`'s F-08/F-09:
+neither `/generate` nor `/generate/long-form` caps input size), so whatever
+a caller submits to be spoken — which, for a text-to-speech service, is
+whatever the caller wanted said, potentially including anything sensitive
+they intended only for synthesis, not for a shared log stream — lands in
+plaintext in that stream in full, every time.
+
+#### Measured against `DESIGN.md`, "Security model": "tokens are never logged and never placed in URLs"
+
+**This specific rule is not violated today, and cannot be, because there is
+no token to violate it with.** `T-03-01-01`'s grep for `Authorization` over
+`src/` found no matches; nothing in the codebase reads, checks, or forwards
+a bearer token yet, so `app.logger.info(f"Text: {body.text}")` — which logs
+only the `text` field of the request body — has no path by which a token
+could reach it under the design as specified (the token is defined to
+arrive via the `Authorization` header, a value `body.text` never carries,
+not via the field this line logs).
+
+**What this means for the model once a token exists:** the rule survives
+this specific line, but not because the codebase enforces it — nothing
+about this logging statement, or the `dictConfig` setup behind it, filters,
+redacts, or allowlists what gets logged; it logs a whole field, verbatim,
+by construction. The rule holds today only because *this* field happens
+not to carry credentials, which is true by the shape of the current design,
+not by any check. This is a precedent worth naming: the codebase's one
+existing example of "log a caller-supplied value" logs it whole and
+unfiltered, and the security model's "never logged" guarantee for the
+token, once one exists, will depend entirely on every future logging
+statement individually declining to do what this one already does to a
+different field — there is no shared redaction path, allowlist, or
+structured-logging boundary anywhere in `app.py` that a future statement
+would have to bypass to violate the rule; it would simply have to do
+nothing differently from what line 997 already does.
+
+### Findings: data exposure
+
+Numbering continues from `F-12` above.
+
+#### F-13: `GET /voices` and the OpenAPI documentation routes disclose operator-chosen names and the full API schema to any unauthenticated, cross-origin-readable caller
+
+**Severity:** Low — real information disclosure against the recorded
+security model (both routes would require a bearer token under `DESIGN.md`,
+per `T-03-01-01`'s route enumeration), but bounded: voice-sample names and
+the API's own schema are not secrets whose disclosure enables further
+compromise on their own, and (for the OpenAPI surface) largely mirror what
+reading this project's own published source already reveals.
+
+**Reproduction:** `GET /voices` against an `OUTPUT_DIR` seeded with
+`genn.wav`, `mrmeeseeks.wav`, `rick.wav`, `speaker.wav` (the repository's
+own `workspace/` contents) returns `200
+{"voices": ["genn.wav", "mrmeeseeks.wav", "rick.wav", "speaker.wav"]}` with
+no `Authorization` header sent; `GET /openapi/openapi.json` returns `200`
+with a 9-path, 8-schema OpenAPI document, likewise with no credential.
+
+#### F-14: `GET /ready` discloses live queue depth, model-load state and worker liveness to any unauthenticated caller
+
+**Severity:** Low — genuine operational-state disclosure with no
+credential (`T-03-01-01`'s finding: `/ready` is not listed exempt in
+`DESIGN.md`'s security model, unlike `/health`), but the impact is
+reconnaissance value for timing other findings (F-08/F-09/F-10's
+amplification, or knowing when the worker just restarted) rather than
+direct access to data or the host.
+
+**Reproduction:** with three items placed on `text_queue` and no worker
+running to drain them, `GET /ready` returns `503
+{"model": "loading", "queue_depth": 3, "worker": "dead"}` with no
+`Authorization` header sent.
+
+#### F-15: `app.logger.info(f"Text: {body.text}")` writes every caller's full, unbounded submitted text to the process's stdout in plaintext, with no redaction path anywhere in the codebase
+
+**Severity:** Medium — not exploitable by an outside attacker directly (the
+precondition is access to the process's log stream — an operator, a log
+aggregator, or anyone who can read the container's stdout — which is
+normally a more trusted position than an anonymous network caller), but
+that log stream now durably holds the full content of whatever every
+caller has ever asked this service to speak, unbounded in size
+(`T-03-01-03`'s F-08/F-09) and completely unfiltered, which is a real gap
+against ordinary data-handling expectations for a service that may process
+sensitive spoken content, and sets the only existing precedent in this
+codebase for how a caller-supplied value gets logged.
+
+**Reproduction:** `POST /generate {"text": "please read this back to me:
+super secret patient diagnosis details 12345"}` returns `201`, and the
+application logger (the same one `dictConfig`, `app.py:375-392`, wires to
+`sys.stdout` at `INFO` level) emits `[...] INFO in app: Text: please read
+this back to me: super secret patient diagnosis details 12345` — the
+submitted text, verbatim, in full.
+
+## Out of scope for this task
+
+Per this task's own "Out of scope": setting a CORS allowlist, adding an
+origin check, or removing the logging line — the follow-on epic owns the
+fix, not this report (`EP-03`, "Constraints on scope": the epic implements
+nothing). The container's network exposure and the gunicorn deployment are
+`T-03-01-05`'s platform section. `DESIGN.md` and `KNOWN_ISSUES.md` are not
+edited here; `US-03-02` owns deciding what to do with F-12 through F-15
+above.
