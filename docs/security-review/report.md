@@ -196,3 +196,388 @@ each a later task in this story (`T-03-01-02` through `T-03-01-05`). This
 report does not recommend removing the documented global authentication
 disable switch (`DESIGN.md`, "Authentication can be turned off") — that is a
 recorded decision for homelab deployments, not a finding.
+
+## Input handling: `speaker_wav`, `voice` and `job_id`
+
+`T-03-01-01`'s route enumeration named three parameters that a handler turns
+into a filesystem path: `speaker_wav` (`POST /generate`,
+`POST /generate/long-form`), `voice` (`POST /v1/audio/speech`), and `job_id`
+(the three `/job/<id>` routes). This section establishes what each can reach.
+
+Every claim below was produced by running the app under
+`COQUI_AI_API_START_WORKER=0` against a throwaway `OUTPUT_DIR`, using the
+Flask test client, exactly as `tests/conftest.py` does for the test suite.
+Nothing was run against the repository's own `workspace/*.wav` samples; `git
+status` on the repository shows no changes from writing this section. The
+probe script lived at `/tmp/t030102_probe*.py`, outside the repository, and
+was deleted once its output was captured — nothing exploratory is committed.
+
+### `speaker_wav` — `post_generate` / `post_generate_long_form`
+
+Code path (`src/coqui_ai_api/app.py`), identical in both handlers:
+
+```python
+speaker_wav = None
+if body.speaker_wav:                                            # form.speaker_wav on the long-form handler
+    candidate = os.path.join(OUTPUT_DIR, os.path.basename(body.speaker_wav))
+    if os.path.isfile(candidate):
+        speaker_wav = candidate
+```
+
+The guard is `os.path.basename` (strip everything up to the last `/`) followed
+by `os.path.isfile` (candidate must already exist under `OUTPUT_DIR`). If
+`speaker_wav` is empty, unusable, or the resulting candidate does not exist,
+`speaker_wav` stays `None` on the queued task, and `_process_task` falls back
+to the configured default: `speaker_wav = task.get("speaker_wav") or
+SPEAKER_WAV` (`app.py:857`). Nothing rejects the request in this case — it is
+still enqueued and returns `201`.
+
+Reproduction (`POST /generate` with `COQUI_AI_API_START_WORKER=0`; the queued
+task is inspected directly since no worker consumes it):
+
+```python
+for value in ["plain.wav", "nonexistent.wav", "../../etc/passwd",
+              "/etc/passwd", "sub/plain.wav", "evil.wav"]:
+    resp = client.post("/generate", json={"text": "hello", "speaker_wav": value})
+    queued = app_module.text_queue.get_nowait()
+    print(value, resp.status_code, queued["speaker_wav"])
+```
+
+Observed, against an `OUTPUT_DIR` containing `plain.wav` (a real file) and
+`evil.wav` (a symlink to `/tmp/.../secret.txt`, outside `OUTPUT_DIR` — see
+[the symlink case](#f-04-a-symlink-already-inside-output_dir-is-followed-by-both-guards)):
+
+| Input | Status | Resolved `speaker_wav` on the queued task |
+|---|---|---|
+| `plain.wav` (exists) | 201 | `<OUTPUT_DIR>/plain.wav` |
+| `nonexistent.wav` (basename, absent) | 201 | `None` → falls back to `SPEAKER_WAV` |
+| `../../etc/passwd` (relative traversal) | 201 | `None` → falls back to `SPEAKER_WAV` |
+| `/etc/passwd` (absolute path) | 201 | `None` → falls back to `SPEAKER_WAV` |
+| `sub/plain.wav` (directory component) | 201 | `<OUTPUT_DIR>/plain.wav` — the directory component is discarded and the request silently collides with an unrelated existing file that happens to share the basename |
+| `evil.wav` (symlink placed in `OUTPUT_DIR`) | 201 | `<OUTPUT_DIR>/evil.wav` (the symlink itself; a worker would open it and follow it to its target) |
+
+**Whether `os.path.basename` is a sufficient boundary here:** for the shape
+of attack this class of bug usually means — a string that spells a path
+outside `OUTPUT_DIR` (`../../etc/passwd`, `/etc/passwd`) — yes.
+`os.path.basename` collapses any of those to their last segment before the
+join, and `os.path.isfile` is then checked against a path that is always
+`os.path.join(OUTPUT_DIR, <single-segment-string>)`; there is no string
+`speaker_wav` can hold that survives `os.path.basename` and still names a
+file outside `OUTPUT_DIR`. It is not a boundary against a symlink that is
+already sitting inside `OUTPUT_DIR` (`os.path.basename`/`os.path.isfile`
+never inspect whether a path component is a symlink, only whether the final,
+OS-resolved target exists) — see F-04. It is also not a *rejection*
+boundary: every unusable value is accepted and silently substituted with the
+default sample rather than surfaced as an error, which is a caller-facing
+correctness gap distinct from a traversal — see F-03.
+
+### `voice` — `_resolve_voice` (`POST /v1/audio/speech`)
+
+Code path (`app.py:143`):
+
+```python
+def _resolve_voice(voice: str) -> str | Response:
+    if voice and os.path.basename(voice) == voice:
+        for candidate in _list_speaker_wavs():
+            stem = os.path.splitext(candidate)[0]
+            if voice == candidate or voice == stem:
+                return os.path.join(OUTPUT_DIR, candidate)
+    return make_response(
+        jsonify({"message": "Unknown voice. See GET /voices for available voices."}), 400,
+    )
+```
+
+The guard is two-part: `os.path.basename(voice) == voice` rejects (with `400`)
+anything that is not already a bare basename — a directory component or an
+absolute path fails this check before any filesystem lookup happens — and the
+survivor must then equal a basename (or its stem) that `_list_speaker_wavs()`
+publishes, i.e. it must be a real file already present in `OUTPUT_DIR`, whose
+name does not parse as a UUID.
+
+Reproduction (same inputs as `speaker_wav`, against `POST /v1/audio/speech`;
+`JOB_WAIT_TIMEOUT_SECONDS` was left at its default `300`, so a `voice` that
+*does* resolve blocks until the timeout and returns `504`, since no worker is
+running to finish the job — this is `wait_for_job` behaving as documented,
+not a new finding):
+
+```python
+for value in [...]:  # same six values as above
+    resp = client.post("/v1/audio/speech",
+                        json={"model": "tts-1", "input": "hello", "voice": value})
+    print(value, resp.status_code, resp.get_json(silent=True))
+```
+
+| Input | Status | Body / outcome |
+|---|---|---|
+| `plain.wav` (published) | 504 (after 300s) | Matched, enqueued, timed out waiting for a worker — `{"message": "Timed out waiting for speech generation to finish."}` |
+| `nonexistent.wav` | 400 | `{"message": "Unknown voice. See GET /voices for available voices."}` |
+| `../../etc/passwd` | 400 | Same — rejected by the `os.path.basename(voice) == voice` check itself; `_list_speaker_wavs()` is never consulted |
+| `/etc/passwd` | 400 | Same |
+| `sub/plain.wav` | 400 | Same — unlike `speaker_wav`, a directory component is a flat rejection, not a silent basename collapse |
+| `evil.wav` (symlink) | 504 (after 300s) | Matched — `_list_speaker_wavs()` publishes `evil.wav` exactly like a real sample (see F-04) |
+
+**Difference from `speaker_wav`, stated:** `voice` is stricter in two
+respects that matter for the traversal shape: it rejects a directory
+component or absolute path outright (`400`, "Unknown voice") instead of
+silently collapsing it to a basename and possibly matching an unrelated file,
+and it never falls back to `SPEAKER_WAV` for an unusable value — a wrong
+`voice` is always a caller-visible error (`DESIGN.md`, "How `voice` resolves
+onto a named sample"). This closes the class of traversal-by-string
+completely (there is no `voice` value that reaches a file `GET /voices`
+doesn't already publish), and it also closes the "quiet wrong-but-successful
+synthesis" gap that `speaker_wav`'s silent fallback and basename-collapse
+leave open. **It does not close the symlink class**: `_resolve_voice` reaches
+`OUTPUT_DIR` through the exact same `_list_speaker_wavs()` glob that
+`speaker_wav`'s existence check ultimately depends on being populated by, so
+a symlink dropped into `OUTPUT_DIR` is published and selectable through
+either parameter alike (F-04).
+
+**Whether two different guards on the same underlying resource is itself a
+finding:** yes — see F-05. `speaker_wav` and `voice` are two independently
+written checks over the same directory and the same class of files
+(`OUTPUT_DIR/*.wav`), and they have already diverged in what they do with an
+unusable value (silent default-substitution vs. `400`) even though nothing
+about the underlying resource differs between the two call sites.
+
+### `job_id` — `_get_filename` (`GET`/`DELETE /job/<id>`, `GET /job/<id>/progress`)
+
+Code path (`app.py:674`):
+
+```python
+def _get_filename(job_id: str):
+    return os.path.join(OUTPUT_DIR, f"{job_id}.wav")
+```
+
+There is no guard at all: `job_id` is f-string-interpolated into a filename
+with no `os.path.basename`, no allowlist, and no check that it looks like a
+UUID, even though every `job_id` this project ever mints is
+`str(uuid.uuid4())`. The three routes read `path.job_id` (a route parameter
+typed only as `str` by `JobModel`) and pass it straight to `_get_filename`.
+
+**Route registration** (`app.py:1031`, `1051`, `1197`) uses Flask/Werkzeug's
+default `string` converter — `@app.get("/job/<string:job_id>", ...)` — which
+matches one path segment containing no `/` character; nothing in this
+project's code adds that restriction.
+
+Reproduction, against an `OUTPUT_DIR` containing `rick.wav` (mirroring the
+repository's own `workspace/rick.wav`, per the task's own choice of name):
+
+```python
+for seg in ["%2e%2e%2f", "%2f", "rick"]:
+    path = f"/job/{seg}"
+    print("GET     ", client.get(path).status_code)
+    print("progress", client.get(path + "/progress").status_code)
+    print("DELETE  ", client.delete(path).status_code)
+```
+
+| `job_id` sent | `GET` | `progress` | `DELETE` | `rick.wav` survives `DELETE`? |
+|---|---|---|---|---|
+| `%2e%2e%2f` (percent-encoded `../`) | 404 | 308 → (see below) | 404 | n/a |
+| `%2f` (percent-encoded `/`) | 404 | 308 → 404 | 404 | n/a |
+| `rick` (basename of a named voice sample, no extension) | 200 (serves `rick.wav`) | 200, `status: "done"` | 204 | **No** — `rick.wav` was removed |
+
+**What actually stops the encoded-traversal cases, and whether that is the
+framework or the code:** confirmed by inspecting the WSGI environ Werkzeug's
+test client builds (`werkzeug.test.EnvironBuilder(path=...).get_environ()`),
+which decodes percent-escapes the same way a real WSGI server populates
+`PATH_INFO`:
+
+```python
+>>> EnvironBuilder(path="/job/%2e%2e%2f").get_environ()["PATH_INFO"]
+'/job/../'
+>>> EnvironBuilder(path="/job/%2e%2e%2f/progress").get_environ()["PATH_INFO"]
+'/job/..//progress'
+>>> EnvironBuilder(path="/job/%2f").get_environ()["PATH_INFO"]
+'/job//'
+>>> EnvironBuilder(path="/job/%2f/progress").get_environ()["PATH_INFO"]
+'/job///progress'
+```
+
+- `GET`/`DELETE /job/%2e%2e%2f` (`PATH_INFO` `/job/../`) and
+  `/job/%2f` (`PATH_INFO` `/job//`): the decoded path has a trailing empty
+  segment that matches no registered rule (`/job/<string:job_id>` requires
+  exactly one non-empty segment with no trailing slash), so Werkzeug's router
+  raises `NotFound` before any application code runs. **This is the
+  framework, not the code**: nothing in `get_job` or `delete_job` ever sees
+  these requests.
+- `GET /job/%2e%2e%2f/progress` and `/job/%2f/progress` (`PATH_INFO`
+  `/job/..//progress` and `/job///progress`): Werkzeug's routing normalizes
+  the doubled slash and issues a **308** redirect (`Location:
+  http://localhost/job/../progress` and `.../job/progress` respectively).
+  Following the first redirect literally (the test client does not resolve
+  `.`/`..` segments the way a URL-reference resolver would — it re-requests
+  the literal string) lands on `PATH_INFO` `/job/../progress`, which the
+  `string` converter matches as a **single, opaque segment whose value is the
+  two-character string `".."`** — Werkzeug's routing splits on `/`, it does
+  not interpret `..` as "go up one directory" the way a filesystem or a URL
+  normalizer would. `get_job_progress` then calls
+  `_get_filename("..")`, which is `os.path.join(OUTPUT_DIR, ".." + ".wav")` =
+  `OUTPUT_DIR/"...wav"` (three dots, a harmless, ordinary filename, not a
+  parent-directory escape) — confirmed directly:
+  ```python
+  >>> app_module._get_filename("..")
+  '/tmp/.../...wav'
+  ```
+  That file does not exist, so `get_job_progress` (which has no 404 path —
+  see the route enumeration) returns `200` with `"status": "processing"`.
+  Following the second redirect (`/job/%2f/progress` → `/job/progress`) hits
+  no rule at all (`404`), because `/job/progress` does not match
+  `/job/<string:job_id>/progress` without a `job_id` segment, nor any other
+  rule.
+
+  **This is still the framework, not the code**: `_get_filename` performs
+  *no* validation of any kind — the reason `..` cannot escape `OUTPUT_DIR`
+  today is that Werkzeug's `string` converter can never hand `_get_filename`
+  a value containing `/`, so `f"{job_id}.wav"` can never contain a path
+  separator either. If `job_id`'s converter were ever changed to
+  Werkzeug's `path` converter (which does allow `/`), or if `_get_filename`
+  were ever called with an id from a source other than this route
+  (`_expire_job`'s segment cleanup already calls it with ids taken from the
+  in-memory registry, not from route matching), the join would escape
+  `OUTPUT_DIR` immediately, because there is no check at the point where the
+  path is actually built. See F-07.
+
+- `job_id = "rick"` (no encoding at all): matches the `string` converter
+  trivially, since it is an ordinary single segment. `GET /job/rick` returns
+  `rick.wav` (`200`) because `os.path.isfile` finds it — `get_job` has no
+  concept of "this isn't a job I created," only "does a file by this name
+  exist." `GET /job/rick/progress` returns `200`, `"status": "done"`, for the
+  same reason. `DELETE /job/rick` returns `204` and **removed `rick.wav` from
+  disk** — confirmed by checking the file before and after the call. See
+  F-06.
+
+### How `_list_speaker_wavs()`, `_sweep_orphan_wavs()` and `_expire_job()` actually relate
+
+Read together, these three functions are not "the same weak rule in three
+places" — they are **two different rules**, and the `rick` case above is the
+demonstration of what happens when the two disagree:
+
+- **Rule A — "does the basename parse as a UUID?"** (`uuid.UUID(name)`,
+  wrapped in `try`/`except ValueError`), used by exactly two functions:
+  - `_list_speaker_wavs()` (`app.py:131`): a basename that parses as a UUID is
+    *excluded* from what `GET /voices` publishes and what `_resolve_voice`
+    can match — it is assumed to be a job output, not a named sample.
+  - `_sweep_orphan_wavs()` (`app.py:689`): a basename that parses as a UUID is
+    deleted at startup as an orphaned job output; anything else (including
+    `rick.wav`) is left untouched.
+- **Rule B — "does something already know about this id?"**, used by the
+  live deletion path:
+  - `_expire_job()` (`app.py:707`) does **not** call `uuid.UUID` at all. It is
+    keyed entirely by membership in the in-memory `jobs` registry
+    (`jobs.pop(job_id, None)`; a no-op if absent) plus, separately,
+    `long_form_jobs`.
+  - `delete_job()` (`app.py:1056`), the actual route handler, is looser
+    still: it proceeds if *any* of three things is true —
+    `job_id in jobs`, `job_id in long_form_jobs`, or
+    `os.path.isfile(_get_filename(job_id))` — and having decided to proceed,
+    it calls `_expire_job(job_id)` (a no-op for `"rick"`, which is in neither
+    registry) and then unconditionally `os.remove(wav_file)`. The file-exists
+    branch of that `or` is what fires for `"rick"`.
+
+So a basename can be simultaneously "not a job" by Rule A (excluded from the
+startup sweep, published as a voice) and "deletable as if it were a job" by
+Rule B (present on disk, which is all `delete_job` requires). That inversion
+— safe from the passive cleanup path, not safe from the live one — is what
+F-06 reports. The task's framing (one shared UUID rule governs all three) does
+not hold for `_expire_job`/`delete_job`; this section states the discrepancy
+rather than repeating the assumption.
+
+### Findings: `speaker_wav`, `voice` and `job_id`
+
+Numbering continues from `F-02` above.
+
+#### F-03: `speaker_wav`'s unusable values are silently replaced by the default sample, never rejected
+
+**Severity:** Low — not a traversal (see the boundary assessment above), but
+a caller who mistypes or mis-configures `speaker_wav` gets a `201` and audio
+in the wrong (default) voice with no error anywhere in the response, which is
+a real correctness/observability gap against a reasonable expectation that an
+unusable identifier is reported, not silently substituted.
+
+**Reproduction:** `POST /generate` with `{"text": "hello", "speaker_wav":
+"nonexistent.wav"}` under a fresh `OUTPUT_DIR` returns `201`; the queued
+task's `speaker_wav` field is `None`, so `_process_task` (`app.py:857`) uses
+`SPEAKER_WAV` instead, without saying so anywhere the caller can see.
+
+#### F-04: A symlink already inside `OUTPUT_DIR` is followed by both guards, and published by `GET /voices`
+
+**Severity:** Informational — the precondition (independent write/symlink
+access to `OUTPUT_DIR`) is not reachable through any endpoint this project
+serves; nothing in `src/` writes an attacker-chosen name into `OUTPUT_DIR`
+except job outputs, which are always UUID-named by this project's own code.
+Recorded because it shows the real boundary both guards enforce is "whatever
+is already sitting in `OUTPUT_DIR`," not "a file this project put there,"
+which matters the moment anything else (a future upload feature, a shared
+volume, an operator's own script) can place a file there under a name of its
+choosing.
+
+**Reproduction:** with `evil.wav` a symlink inside `OUTPUT_DIR` pointing at a
+file outside it, `POST /generate {"speaker_wav": "evil.wav"}` resolves
+`speaker_wav` to the symlink path (`os.path.isfile` follows symlinks), and
+`GET /voices` lists `evil.wav` alongside real samples because
+`_list_speaker_wavs()` only excludes UUID-shaped basenames, not symlinks —
+`_resolve_voice("evil.wav")` (or `"evil"`) then resolves it the same way.
+
+#### F-05: `speaker_wav` and `voice` are two independently written guards over the same resource, and they already disagree
+
+**Severity:** Informational — a maintainability/consistency finding, not a
+vulnerability on its own; recorded because a future change to either guard in
+isolation (tightening or loosening it) will silently change the security
+posture of only one of the two parameters that reach the identical
+`OUTPUT_DIR/*.wav` resource.
+
+**Reproduction:** compare the two code paths quoted above — `speaker_wav`'s
+`os.path.isfile(os.path.join(OUTPUT_DIR, os.path.basename(x)))` versus
+`voice`'s `os.path.basename(x) == x` plus membership in
+`_list_speaker_wavs()` — against the same six inputs in the two tables above;
+`sub/plain.wav` alone produces a `201`-with-silent-basename-match for
+`speaker_wav` and a flat `400` for `voice`.
+
+#### F-06: `DELETE /job/<id>` deletes any file in `OUTPUT_DIR` named `<id>.wav`, including a named voice sample that was never a job
+
+**Severity:** High — exploitable today without a credential (per
+`T-03-01-01`, nothing checks one), destructive, and the precondition is
+merely knowing a basename that `GET /voices` — itself unauthenticated —
+already publishes. An attacker (or an unrelated caller who happens to name a
+job the same as an existing sample, since nothing stops a client from using
+`job_id`-shaped identifiers of its own choosing anywhere this project doesn't
+mint the id itself... though today every route that creates a job mints its
+own UUID, so the realistic path is simply targeting a known sample name
+directly) can permanently remove a deployment's cloned-voice sample with one
+unauthenticated request.
+
+**Reproduction:** with `rick.wav` present in `OUTPUT_DIR` (mirroring the
+repository's own `workspace/rick.wav`) and never registered as a job,
+`DELETE /job/rick` returns `204`, and `rick.wav` no longer exists on disk
+afterward. `delete_job`'s guard (`app.py:1071`) treats
+`os.path.isfile(_get_filename(job_id))` as sufficient reason to proceed,
+independently of whether `job_id` is in the `jobs` registry.
+
+#### F-07: `job_id` reaches `_get_filename` with no validation at all; today's immunity to traversal is Werkzeug's routing, not this code
+
+**Severity:** Informational — not exploitable today (see the reproduction
+above: every path that could carry a `/` is intercepted by the `string`
+converter or by Werkzeug's own redirect-and-rematch behavior before
+`_get_filename` ever runs), but recorded because the safety is coincidental
+to how the route is declared, not defensive code at the one place
+(`_get_filename`) where the path is actually built. `_get_filename` also has
+at least one caller today (`_expire_job`, cleaning up long-form segment ids)
+that does not come from route matching at all, and relies on those ids being
+trustworthy by construction rather than by any check in `_get_filename`
+itself.
+
+**Reproduction:** `grep -n "_get_filename" src/coqui_ai_api/app.py` shows
+every call site; none passes through `os.path.basename` or any allowlist.
+The percent-encoding reproductions above show the `string` converter and
+Werkzeug's merge-slash redirect are what currently stand between a `job_id`
+containing `/` or `..` and `_get_filename`.
+
+## Out of scope for this task
+
+Per `T-03-01-02`'s "Out of scope": the uploaded file itself on
+`/generate/long-form` (size, decoding, how many jobs it creates — `T-03-01-03`);
+CORS, `/voices` as a listing, and log content (`T-03-01-04`); and adding
+validation, a UUID check, or a test under `tests/` — the follow-on epic
+decides the fix, and this task reports today's behaviour rather than pinning
+it. `DESIGN.md` and `KNOWN_ISSUES.md` are not edited here; `US-03-02` owns
+that, including deciding what to do with F-03 through F-07 above.

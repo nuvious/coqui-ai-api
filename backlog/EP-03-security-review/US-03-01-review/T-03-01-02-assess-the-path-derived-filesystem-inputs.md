@@ -5,7 +5,7 @@ schema_version: '2'
 title: Assess every request parameter that becomes a filesystem path
 epic: EP-03
 story: US-03-01
-status: todo
+status: done
 deps:
 - T-03-01-01
 scope:
