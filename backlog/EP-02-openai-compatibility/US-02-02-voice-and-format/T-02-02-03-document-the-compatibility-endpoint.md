@@ -5,7 +5,7 @@ schema_version: '2'
 title: Document the compatibility endpoint and retire the deviation it closes
 epic: EP-02
 story: US-02-02
-status: done
+status: reopened
 deps:
 - T-02-01-02
 scope:
@@ -108,3 +108,17 @@ without a working endpoint.
   unmeasured maintainer work (`DESIGN.md`, "Future work", "Measure and scan the
   migrated image").
 - Cutting a release or bumping the version.
+
+## Review notes
+
+Documentation only; do not change any code in src/ or tests/, and do not change the endpoint's behaviour. Two fields of the frozen compatibility contract behave in ways that only CONTRIBUTING.md (the developer guide) records, leaving DESIGN.md and README.md describing something other than what shipped.
+
+1. `speed`. As implemented (`_validate_speech_speed` in src/coqui_ai_api/app.py), any value other than 1.0 returns 400 with the message "Unsupported speed <v>. This deployment cannot change playback speed; omit `speed` or set it to 1.0." Verified live: `speed: 1.25` -> 400; `speed: 1` and `speed: 1.0` -> 200. This is a real, user-visible restriction on a field OpenAI clients routinely set. Fix both places:
+   - DESIGN.md, "Compatibility target": the `speed` row of the field table still has an empty Notes cell, while the `voice` and `response_format` rows were updated to point at their decisions. Fill it in the same style, pointing at a short recorded decision. That decision needs the form DESIGN.md uses everywhere else -- what was decided, why (the worker has no playback-speed control: `_process_task` forwards only `text`, `file_path` and `speaker_wav` to `tts_to_file`), what would have to change to revisit it (actual speed control in the worker, not a wider accepted set here), and the date it was decided. The reasoning already exists in CONTRIBUTING.md, "Key design: async job queue", under "`speed` accepts exactly `1.0`"; move the product decision to DESIGN.md and leave CONTRIBUTING.md pointing at it, matching how `response_format` is handled ("state it, do not re-derive it").
+   - README.md, "OpenAI-compatible endpoint": the section documents `voice`, `response_format`, blocking/timeouts and the 4096-character cap, and never mentions `speed`. Add a short subsection in the same voice as the others, showing the exact 400 body a client gets, so a user whose client sets `speed` can diagnose it from the user guide instead of the source.
+
+2. `stream_format`. The pydantic model ignores unknown fields, so a request carrying `stream_format` is accepted and it is silently ignored -- verified live: 200 with mp3 audio. That is the epic's deliberate deferral of streaming ("Constraints on scope"), but since the "There is no `/v1/audio/speech` endpoint" deviation was deleted from DESIGN.md, nothing now records it. Note it in the `stream_format` row of the DESIGN.md field table (one line: not served, streaming deliberately deferred, accepted-and-ignored rather than rejected). This is a note about what the endpoint does, not a request to start rejecting the field -- do not change the behaviour.
+
+3. Consider whether the CHANGELOG.md entry, which already enumerates the `voice` and `response_format` rules, should also mention that `speed` accepts only 1.0. It is the same class of user-visible restriction as the `aac` rejection it already lists. Your judgement; keep the entry in the file's existing Keep a Changelog voice either way.
+
+What is already correct and must not be re-litigated: the `voice` rule, the `response_format` set and its `mp3` default, the deletion of the "no `/v1/audio/speech` endpoint" deviation, the retirement of both answered open questions, the restatement of the concurrency open question, and the KNOWN_ISSUES.md/DESIGN.md agreement on the three transformers advisories. All of those were checked and are right. `make verify` must still pass when you are done.

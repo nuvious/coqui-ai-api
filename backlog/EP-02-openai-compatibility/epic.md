@@ -7,7 +7,7 @@ branch: feat/EP-02-openai-compatibility
 depends_on:
 - EP-01
 planning: done
-review: pending
+review: changes-requested
 ---
 
 ## Goal
