@@ -5,7 +5,7 @@ schema_version: '2'
 title: Open the report and enumerate every route with its authentication state
 epic: EP-03
 story: US-03-01
-status: todo
+status: done
 deps: []
 scope:
 - docs/security-review/
