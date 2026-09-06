@@ -5,7 +5,7 @@ schema_version: '2'
 title: Settle and implement what response_format does
 epic: EP-02
 story: US-02-02
-status: blocked
+status: todo
 deps:
 - T-02-02-01
 scope:
@@ -20,69 +20,94 @@ commit:
 
 ## Objective
 
-The worker produces WAV. The frozen contract offers `mp3`, `opus`, `aac`,
-`flac`, `wav` and `pcm` (`DESIGN.md`, "Compatibility target"). `DESIGN.md`, "Open
-questions", records the gap: "What does `response_format` do when the worker only
-produces WAV? Transcoding to `mp3` and `opus` needs a decision about whether
-ffmpeg becomes a dependency."
+`response_format` is an optional field of the frozen compatibility contract
+(`DESIGN.md`, "Compatibility target"), and **its meaning is now settled**. The
+escalation this task raised was answered on 2026-09-06 and recorded in
+`DESIGN.md`, "What `response_format` serves, and what it rejects", with the
+developer-facing summary in `CONTRIBUTING.md`, "Code style & conventions". Those
+two documents are the specification; this task implements them and nothing beyond
+them.
 
-**This task escalates first**, for the same reason T-02-02-01 does, and the epic
-singles this question out: answering it may mean adding a runtime dependency and
-changing the image EP-01 just rebased, which is not a decision a task makes.
-Once the answer is recorded, this task implements the part of it that lives in
-`app.py`.
+The decision, in one line: five of the six upstream values are served — `mp3`,
+`opus`, `flac`, `wav` and `pcm` — the default when the field is absent is `mp3`,
+and `aac` is a `400` naming the five that work.
+
+The escalation assumed compressed formats meant adding ffmpeg to the runtime
+image. They do not. `soundfile` (libsndfile 1.2.2) is already installed in the
+dev container and in the shipped image, encodes MP3, Ogg/Opus and FLAC in
+process, and has no AAC encoder — which is the only reason `aac` is rejected.
+Read the DESIGN.md section before writing code; it also records what is
+deliberately *not* this task's work.
 
 ## Acceptance criteria
 
-**If the question is still open** — `DESIGN.md`, "Open questions", still contains
-the entry beginning "What does `response_format` do when the worker only produces
-WAV?" — then:
-
-- [ ] `.orchestrator/escalation.json` is written per `backlog/README.md`,
-      "Escalation". State plainly that the compressed formats need transcoding,
-      that transcoding most likely means ffmpeg in the runtime image, and what
-      that costs against the slim base recorded in `DESIGN.md`, "The runtime image
-      base, and which PyTorch it ships". Offer at least: serve `wav` (and any
-      other format the worker can already produce) and return a documented error
-      for the rest; or transcode, naming the dependency that implies.
-- [ ] Nothing else changed. `git status --porcelain src tests` reports no
-      modifications, and the session stops there.
-
-**Once the answer is recorded** in `DESIGN.md` as a decision with its source and
-the date it was checked:
-
-- [ ] The supported set is exactly what the decision names, expressed once in
-      `src/coqui_ai_api/app.py` rather than spelled out at each use.
-- [ ] An unsupported value returns a rejection that says so and names the values
-      that do work. Silently returning WAV for a request that asked for `mp3` is
-      a failed criterion, not a shortcut (`US-02-02` acceptance criteria).
-- [ ] The content type the endpoint will send matches the bytes it will actually
-      return, for every supported value. A test asserts the pairing.
-- [ ] An absent `response_format` behaves as the recorded decision says, and the
-      default is stated in `CONTRIBUTING.md` where the endpoint is described.
-- [ ] Tests cover each supported value and at least one unsupported one.
+- [ ] The supported set is exactly `mp3`, `opus`, `flac`, `wav` and `pcm`,
+      expressed **once** in `src/coqui_ai_api/app.py` as a single mapping from
+      format to its encoder settings and its `Content-Type`, rather than spelled
+      out at each use.
+- [ ] `aac` returns a `400` whose message says so and names the five values that
+      do work. Silently returning WAV — or any other format's bytes — for a
+      request that asked for `aac` is a failed criterion, not a shortcut
+      (`US-02-02` acceptance criteria).
+- [ ] An absent `response_format` produces `mp3`, matching upstream's own default.
+- [ ] The `Content-Type` sent matches the bytes actually returned, for every
+      supported value, per the table in `DESIGN.md`: `audio/mpeg`, `audio/ogg`,
+      `audio/flac`, `audio/wav`, `audio/pcm`. A test asserts the pairing.
+- [ ] `pcm` is the WAV's frames as signed 16-bit little-endian with the header
+      stripped, at the model's native sample rate. No resampling.
+- [ ] `wav` returns the worker's bytes unmodified — it does not round-trip through
+      the encoder.
+- [ ] Tests cover each of the five supported values and `aac`. For the encoded
+      formats, assert the container is real (the leading bytes: `fLaC` for FLAC,
+      `OggS` for Opus, an MPEG frame sync for MP3) rather than only that the
+      response was a `200`.
+- [ ] A test asserts the `MP3`, `OGG` and `FLAC` write formats are actually
+      available from the installed `soundfile`, so that a future `coqui-tts` bump
+      that drops the transitive dependency fails the gate loudly instead of
+      breaking the endpoint silently. `DESIGN.md`, "Future work", "Declare
+      `soundfile` as a direct dependency", is the reason this test exists.
+- [ ] `CONTRIBUTING.md`'s "API surface" table gains the `/v1/audio/speech` row,
+      naming the served set and the `mp3` default. T-02-02-03 later expands the
+      surrounding prose; it does not re-create this row.
 - [ ] `make verify` passes, coverage stays at or above 95%, and the `pip-audit`
       ignore list is untouched (`CONTRIBUTING.md`, "Additional rules for agents":
       the list is closed).
 
 ## Constraints
 
-- If the recorded decision assigns work to the `Dockerfile`, to
-  `pyproject.toml`, or to a new epic, **that work is not this task's**. Implement
-  only the part the decision places in the application, and say in the task
-  result what was left where. If the decision does not say where the rest lands,
-  that is a second gap: escalate again rather than guessing.
+- **Do not declare `soundfile` in `pyproject.toml`, and do not touch `uv.lock`.**
+  It is used as an installed transitive dependency on purpose. Declaring it needs
+  `uv lock` to re-run, which needs network access this session does not have
+  (`uv lock --offline` cannot resolve this project's graph from cache, verified
+  2026-09-06). It is recorded as maintainer host-only work in `DESIGN.md`, "Future
+  work". Say in the task result that it is still outstanding.
+- **`soundfile` ships no type information.** Suppress it at the import site in
+  `app.py` with `# type: ignore[import-untyped]` and a one-line comment. Do **not**
+  add a `[[tool.mypy.overrides]]` entry: `pyproject.toml` stays out of this task's
+  `scope`, which is also what keeps the `pip-audit` carve-out in
+  `CONTRIBUTING.md`, "Additional rules for agents", condition 2, available to you.
+- **Keep the package importable without the heavy ML stack** (`CONTRIBUTING.md`,
+  "Code style & conventions"). `soundfile` is a small CFFI binding, not part of
+  that stack, and a module-level import of it is fine; `torch`, `torchaudio`,
+  `torchcodec` and `TTS` remain forbidden at module level.
+- Encoding happens in the compatibility endpoint, after the job completes. The
+  worker keeps writing WAV, `/job/<id>` keeps returning WAV, and neither the queue
+  nor the native endpoints change.
 - `DESIGN.md`, "Compatibility target", freezes the field name and its value set.
-  Supporting fewer values than upstream is a documented rejection, never a
-  renamed field or an extra one.
+  Rejecting `aac` is a documented rejection, never a renamed field or an extra one.
 - `DESIGN.md`, "Response shapes are a contract, at two different strengths": the
   compatibility fields are frozen. Do not "improve" them.
-- No network access. Do not attempt to add or resolve a new Python dependency to
-  test a transcoding path.
+- No network access. Do not attempt to add or resolve a new Python dependency.
 
 ## Out of scope
 
 - The route and its HTTP status codes (T-02-01-02).
-- `voice` resolution (T-02-02-01).
+- `voice` resolution (T-02-02-01), already done.
+- `README.md`. The user-facing write-up of `response_format` belongs to
+  T-02-02-03, which documents what shipped.
 - Streaming and `stream_format`, deferred by the epic's "Constraints on scope".
-- Any `Dockerfile` or dependency change, whatever the decision turns out to be.
+- Any `Dockerfile`, `pyproject.toml` or `uv.lock` change. The decision assigns
+  nothing to the `Dockerfile` — ffmpeg is already there for `torchcodec` and is
+  not used by this feature — and assigns the `soundfile` declaration to a
+  maintainer on a networked host.
+- `aac`. It is decided against, not postponed. Do not add a follow-up task for it.

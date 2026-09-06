@@ -251,6 +251,25 @@ The conventions the tools cannot check, and which matter more:
   Native endpoint shapes may evolve when the change is recorded in the API surface
   table below and in `CHANGELOG.md`. Additive changes are always allowed. See
   [DESIGN.md](DESIGN.md) for why this is looser than it used to be.
+- **`/v1/audio/speech` serves five of the six upstream `response_format`
+  values.** `mp3`, `opus`, `flac`, `wav` and `pcm` are served; `aac` returns a
+  `400` naming the other five. **When the field is absent the default is `mp3`**,
+  matching upstream, so a client that omits it gets what OpenAI would have sent.
+  The supported set, the encoder settings and the per-format `Content-Type` live
+  in one mapping in `app.py`, not restated at each use. The rule and its reasoning
+  are [DESIGN.md](DESIGN.md), "What `response_format` serves, and what it rejects";
+  state it, do not re-derive it.
+- **`soundfile` is used but not declared, on purpose. Do not "fix" it.** The
+  compressed `response_format` values are encoded through `soundfile`
+  (libsndfile), which reaches the environment as a transitive dependency of
+  `coqui-tts` and `librosa` and is present in both the dev container and the
+  shipped image. Adding it to `[project.dependencies]` needs `uv lock` to re-run,
+  and that needs network access this sandbox does not have — `uv lock --offline`
+  cannot resolve this project's graph from cache. It is recorded as maintainer
+  host-only work in [DESIGN.md](DESIGN.md), "Future work". An agent that edits
+  `pyproject.toml` or `uv.lock` to declare it will fail the gate, not fix
+  anything. The test that asserts the `MP3`, `OGG` and `FLAC` encoders are
+  available is what covers the risk in the meantime; do not delete it.
 - **The version lives in `pyproject.toml` and nowhere else.** Read it from
   `coqui_ai_api.__version__`, which comes from installed package metadata.
   `tests/test_version.py` enforces this.

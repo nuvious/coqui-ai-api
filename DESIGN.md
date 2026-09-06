@@ -62,11 +62,16 @@ The contract, from that source:
 | `model` | yes | |
 | `input` | yes | Hard cap of 4096 characters upstream |
 | `voice` | yes | Names one of this project's WAV samples; see [How `voice` resolves onto a named sample](#how-voice-resolves-onto-a-named-sample) |
-| `response_format` | no | `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm` |
+| `response_format` | no | `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`; this deployment serves every value but `aac`, see [What `response_format` serves, and what it rejects](#what-response_format-serves-and-what-it-rejects) |
 | `speed` | no | |
 | `stream_format` | no | |
 
-The response is binary audio (`application/octet-stream`), not JSON.
+The response is binary audio, not JSON. The upstream specification declares the
+response body as `application/octet-stream`; this project sends the specific
+media type for the format it actually encoded, which is what the upstream service
+itself does and what a client needs in order to hand the bytes to a decoder. The
+per-format types are in
+[What `response_format` serves, and what it rejects](#what-response_format-serves-and-what-it-rejects).
 
 This dialect was chosen because it is what clients already speak. Hermes' TTS
 configuration exposes `base_url` explicitly to point at "OpenAI-compatible TTS
@@ -165,6 +170,102 @@ question raised 2026-08-01. The upstream contract this is compatible with is the
 same source as [Compatibility target](#compatibility-target) above, checked
 2026-08-01; no re-check was needed, because the decision constrains what this
 project accepts in the field rather than the field itself.
+
+### What `response_format` serves, and what it rejects
+
+The worker writes WAV and continues to. `tts_to_file` is the engine's own output
+path, WAV is what `/job/<id>` has always returned, and nothing here changes
+either. `response_format` is served by **re-encoding the finished WAV on the way
+out of `/v1/audio/speech`**, after the job completes and before the bytes are
+returned. The queue, the worker and the native endpoints are untouched.
+
+**Five of the six upstream values are served. `aac` is rejected.**
+
+| `response_format` | Produced by | `Content-Type` |
+|---|---|---|
+| `mp3` (the default) | libsndfile `MP3` / `MPEG_LAYER_III` | `audio/mpeg` |
+| `opus` | libsndfile `OGG` / `OPUS`, i.e. Ogg-encapsulated Opus, as upstream returns | `audio/ogg` |
+| `flac` | libsndfile `FLAC` / `PCM_16` | `audio/flac` |
+| `wav` | the worker's bytes, unmodified | `audio/wav` |
+| `pcm` | the WAV's frames as signed 16-bit little-endian, header stripped | `audio/pcm` |
+| `aac` | **not served**: a `400` naming the five values above | — |
+
+The rule, exactly:
+
+- **The default, when `response_format` is absent, is `mp3`**, because that is
+  upstream's own default. A client that omits the field gets what it would have
+  got from OpenAI, so there is no default-value deviation for a client to discover
+  at runtime. This is the reason `mp3` had to be served rather than rejected: it
+  is the value the majority of off-the-shelf clients send, explicitly or by
+  omission, and an endpoint that `400`s on it does not meet this epic's goal of
+  working "without a plugin".
+- **`aac` returns a `400` that names the five values that do work.** Returning WAV
+  bytes — or any other format's bytes — under an `aac` request is forbidden
+  (`US-02-02` acceptance criteria). The reasoning is the same as for an unknown
+  `voice` above: for a client that cannot see the deployment, a
+  wrong-but-successful response is worse than a clear error.
+- **The encoder is `soundfile`**, the CPython binding to libsndfile. See the row
+  in [Standards and tooling decisions](#standards-and-tooling-decisions) for the
+  source and the date its format support was checked. libsndfile has no AAC
+  encoder, and that — not image size, and not a missing dependency — is the whole
+  reason `aac` is the one rejected value.
+- **`pcm` is raw, headerless, and carries the model's native sample rate.** For
+  the shipped configuration (`model_name: tts_models/multilingual/multi-dataset/xtts_v2`)
+  that is 24 kHz mono, which is exactly what upstream specifies `pcm` to mean, so
+  the shipped deployment is conformant. A deployment that points `model_name` at a
+  model with a different output rate serves `pcm` at that rate instead, and a
+  client has no header to learn it from. That is a deployer-visible consequence of
+  changing `model_name`, recorded here and in `README.md` rather than guarded in
+  code: every other value carries its own header and is unaffected.
+- **The supported set is expressed once** in `src/coqui_ai_api/app.py`, as one
+  mapping from format to encoder settings and media type, rather than restated at
+  each use.
+
+Rejected alternatives:
+
+- **Accepting the compressed values and returning WAV bytes anyway.** Forbidden by
+  `US-02-02`, and the worst available option: the client cannot tell, and the
+  failure surfaces as corrupt audio somewhere downstream.
+- **Serving only `wav` and `pcm`, and rejecting all four compressed values.** This
+  was the shape the escalation proposed, on the belief that anything compressed
+  needed ffmpeg added to the runtime image. It does not: three of those four
+  formats are already encodable in-process. Rejecting `mp3` in particular would
+  have made the endpoint fail on the default settings of most clients it exists to
+  serve, in exchange for nothing.
+- **Transcoding through ffmpeg, or through `torchcodec`/`torchaudio`, to reach
+  `aac` as well.** ffmpeg is genuinely available at runtime — the `Dockerfile`
+  already installs it, because `torchcodec` needs it for the engine's own audio IO
+  — so this was cheaper than the escalation assumed. It is still rejected: the dev
+  container deliberately has no ffmpeg, so `make verify` could never exercise that
+  path, and shipping one format whose encoder the gate cannot reach is worse than
+  documenting its absence. Revisit only if ffmpeg becomes available to the gate.
+- **Resampling `pcm` to 24 kHz when the configured model differs.** Adds a
+  resampler and a quality decision to a compatibility shim in order to paper over
+  a deliberate deployer choice. Documented instead.
+
+Consequences recorded elsewhere, so that no task has to infer them:
+
+- `soundfile` is presently an **undeclared transitive dependency**, pulled in by
+  `coqui-tts` (and `librosa`), and therefore already present in both the dev
+  container and the shipped image, which installs the full locked graph via
+  `uv sync --frozen`. The code may rely on it now. Promoting it to a declared
+  direct dependency in `pyproject.toml` requires re-running `uv lock`, which needs
+  network access an autonomous session does not have, so it is **maintainer
+  host-only work**; see [Future work](#future-work), "Declare `soundfile` as a
+  direct dependency". Until it is declared, a test asserts that the `MP3`, `OGG`
+  and `FLAC` encoders are actually available, so a future `coqui-tts` bump that
+  drops `soundfile` fails the gate loudly instead of breaking the endpoint
+  silently.
+- **Nothing lands in the `Dockerfile`**, and nothing is deferred to a future epic.
+  `aac` is decided against, not postponed.
+
+Decided 2026-09-06, resolving an escalation from T-02-02-02 against the open
+question raised 2026-08-01. The upstream field, its value set and its `mp3`
+default come from the same source as
+[Compatibility target](#compatibility-target), checked 2026-08-01. The encoder's
+format support was checked against the installed `soundfile` 0.13.1 /
+libsndfile 1.2.2 on 2026-09-06 by encoding each format and inspecting the
+resulting bytes.
 
 ## Security model
 
@@ -508,6 +609,7 @@ a finding is worth re-checking.
 | OpenAI `/v1/audio/speech` as the compatibility dialect | [openai/openai-openapi](https://raw.githubusercontent.com/openai/openai-openapi/master/openapi.yaml), OpenAI's published spec | 2026-08-01 |
 | `Authorization: Bearer` for authentication | OWASP API security guidance prefers header bearer tokens over cookies for APIs; also what the compatibility dialect sends | 2026-08-01 |
 | `coqui-tts` (the Idiap fork) as the engine, not `TTS` | [idiap/coqui-ai-TTS](https://github.com/idiap/coqui-ai-TTS) and [PyPI](https://pypi.org/project/coqui-tts/); upstream `coqui-ai/TTS` unmaintained since Coqui AI shut down in January 2024 | 2026-08-01 |
+| `soundfile` (libsndfile) as the `response_format` encoder, not ffmpeg | [python-soundfile](https://python-soundfile.readthedocs.io/) over [libsndfile](https://libsndfile.github.io/libsndfile/formats.html), which lists MPEG Layer III, FLAC and Ogg/Opus among its write formats and no AAC; confirmed against the installed soundfile 0.13.1 / libsndfile 1.2.2 by encoding each | 2026-09-06 |
 | Runtime image built on a slim base from `uv.lock`, not a pre-built engine image; shipped image ships CUDA torch, gate keeps CPU | Escalation from T-01-02-01, resolved against this document's own container-unblock reasoning under [The engine dependency](#the-engine-dependency); see [The runtime image base](#the-runtime-image-base-and-which-pytorch-it-ships) | 2026-08-01 |
 
 ### Decided against, by design
@@ -612,8 +714,6 @@ escalate rather than guess.
   `test_lock_ordering.py` covers one historical deadlock by construction, not the
   general case. The compatibility facade makes this more pressing, since a
   blocking endpoint holds a request thread for the whole synthesis.
-- What does `response_format` do when the worker only produces WAV? Transcoding
-  to `mp3` and `opus` needs a decision about whether ffmpeg becomes a dependency.
 
 ## Future work
 
@@ -662,6 +762,19 @@ dropped. None of these is an epic yet.
   load to prove synthesis still works, neither of which a sandboxed session has.
   If the spike finds the surface has drifted too far, the answer is to keep the
   pin and the ignores and record that here; a failed spike is a result.
+- **Declare `soundfile` as a direct dependency.** `/v1/audio/speech` encodes
+  `mp3`, `opus` and `flac` through it (see
+  [What `response_format` serves, and what it rejects](#what-response_format-serves-and-what-it-rejects)),
+  but it reaches the environment only as a transitive dependency of `coqui-tts`
+  and `librosa`. Adding it to `[project.dependencies]` needs `uv lock` to re-run,
+  and `uv lock --offline` cannot resolve this project's graph from cache — verified
+  2026-09-06 — so this is **maintainer work on a networked host**, not an
+  autonomous task. It is `uv add soundfile` plus the resulting `uv.lock` change and
+  nothing else: the package, its version and its wheel hashes are already in
+  `uv.lock` today, and it is already installed in the dev container and the shipped
+  image. Until it runs, the gate's encoder-availability test is what stops a
+  `coqui-tts` bump from dropping `soundfile` unnoticed.
+
 - **Real-model end-to-end test.** Needs a GPU runner and multi-gigabyte weights,
   so it can never be part of `make verify`. The engine migration raises its value:
   it is the only check that would catch a synthesis regression between engine

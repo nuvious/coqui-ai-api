@@ -25,17 +25,23 @@ the upstream API does not fail in a way I cannot diagnose.
 
 ## Notes
 
-Both halves of this story are open questions in `DESIGN.md` and neither is
-decided:
+Both halves of this story began as open questions in `DESIGN.md`. **Both were
+escalated and both are now decided**, on 2026-09-06:
 
-- Standard clients send voice names like `alloy` and `nova`. This project's
-  voices are named WAV files in the workspace. Whether the standard names alias
-  onto local samples, are rejected, or are ignored has not been settled.
-- The worker produces WAV. `response_format` offers `mp3`, `opus`, `aac`, `flac`,
-  `wav` and `pcm`. Supporting the compressed formats means transcoding, which
-  probably means adding ffmpeg to the runtime image. That is a dependency
-  decision, not an implementation detail, and it interacts with the base image
-  EP-01 chose.
+- `voice` resolves only against the samples `GET /voices` already publishes, with
+  the `.wav` suffix optional, and anything else is a `400` naming `GET /voices`.
+  There is no alias table for `alloy`, `nova` and the rest; a deployer who needs
+  one drops a `workspace/alloy.wav` in. `DESIGN.md`, "How `voice` resolves onto a
+  named sample".
+- `response_format` serves `mp3`, `opus`, `flac`, `wav` and `pcm`, defaults to
+  `mp3` when absent, and returns a `400` for `aac`. The escalation's premise —
+  that compressed formats mean adding ffmpeg to the runtime image — turned out to
+  be false twice over: ffmpeg is already in the image for `torchcodec`, and
+  `soundfile`/libsndfile is already installed and encodes MP3, Ogg/Opus and FLAC
+  in process. `aac` is rejected because libsndfile has no AAC encoder, not
+  because of a dependency cost. `DESIGN.md`, "What `response_format` serves, and
+  what it rejects".
 
-Escalate on both. The planner should expect this story to be short on tasks and
-long on escalation, and that is the correct shape for it.
+The story was planned short on tasks and long on escalation, and that was the
+correct shape for it. Nothing here is open any more: implement the recorded
+decisions, do not re-open them.
