@@ -12,6 +12,12 @@ This is `US-03-01`'s report. `US-03-02` reads it to author follow-on epics and
 to correct the documents this task deliberately leaves stale (see
 [Findings against the documents](#findings-against-the-documents)).
 
+**Every finding's disposition lives in
+[`docs/security-review/dispositions.md`](dispositions.md), not here**, and
+every scheduled finding's proposed epic is drafted in
+[`docs/security-review/epic-briefs.md`](epic-briefs.md). This report only
+reports; it does not decide what happens next.
+
 ## Conventions this report uses
 
 These conventions are set here and are binding on every task that appends to
@@ -1696,10 +1702,16 @@ above, and every finding before them.
 ## Finding index
 
 Every `F-NN: ...` finding heading in this file, in the order it was
-written, with an empty disposition column for `US-03-02` to fill.
-Generated from this file's own headings (all `F-NN` headings are now `####`,
-uniformly); the count below (19) matches the count of `F-NN:` finding
-headings in this file.
+written, with the Disposition column filled by `US-03-02`. Generated from
+this file's own headings (all `F-NN` headings are now `####`, uniformly);
+the count below (19) matches the count of `F-NN:` finding headings in this
+file.
+
+The Disposition column below is a one-cell pointer, not the reasoning.
+[`docs/security-review/dispositions.md`](dispositions.md) is the authority
+for why each finding got its disposition and, for scheduled findings, which
+proposed epic (drafted in
+[`docs/security-review/epic-briefs.md`](epic-briefs.md)) absorbs it.
 
 Severity was reviewed across the whole list for this task (`T-03-01-05`'s
 constraint: "severity across the whole index must be consistent"); nothing
@@ -1710,25 +1722,25 @@ here.
 
 | ID | Title | Severity | Route / component | Disposition |
 |---|---|---|---|---|
-| F-01 | `DESIGN.md`, "Known deviations", cites a stale route count and line number | Informational | `DESIGN.md` (doc accuracy) | |
-| F-02 | `CONTRIBUTING.md`, "API surface", omits 16 of 27 routes | Informational | `CONTRIBUTING.md` (doc accuracy) | |
-| F-03 | `speaker_wav`'s unusable values are silently replaced by the default sample, never rejected | Low | `POST /generate`, `POST /generate/long-form` | |
-| F-04 | A symlink already inside `OUTPUT_DIR` is followed by both guards, and published by `GET /voices` | Informational | `speaker_wav` / `voice` / `OUTPUT_DIR` | |
-| F-05 | `speaker_wav` and `voice` are two independently written guards over the same resource, and they already disagree | Informational | `speaker_wav` / `voice` handling | |
-| F-06 | `DELETE /job/<id>` deletes any file in `OUTPUT_DIR` named `<id>.wav`, including a named voice sample that was never a job | High | `DELETE /job/<job_id>` | |
-| F-07 | `job_id` reaches `_get_filename` with no validation at all; today's immunity to traversal is Werkzeug's routing, not this code | Informational | `GET`/`DELETE /job/<job_id>`, `GET /job/<job_id>/progress` | |
-| F-08 | Neither native text-input endpoint caps input size; a single request amplifies into an unbounded number of queued jobs | High | `POST /generate`, `POST /generate/long-form` | |
-| F-09 | A no-terminator upload becomes one unbounded-length segment, with no bound on how long the sole worker spends synthesising it | High | `POST /generate/long-form` | |
-| F-10 | No rate limiting exists on any route, so F-08/F-09's amplification is bounded only by how fast one caller can send requests | High | All routes | |
-| F-11 | Disabling job expiration removes the only automatic backstop against F-08/F-09's disk accumulation, with no alternative cleanup an outside caller can trigger | Medium | `JOB_EXPIRATION_SECONDS` / all job routes | |
-| F-12 | CORS ships allowing every origin, every method and every header, on every route, under both shipped config files | High | CORS config (`app.py:288`), all routes | |
-| F-13 | `GET /voices` and the OpenAPI documentation routes disclose operator-chosen names and the full API schema to any unauthenticated, cross-origin-readable caller | Low | `GET /voices`, `GET /openapi/*` | |
-| F-14 | `GET /ready` discloses live queue depth, model-load state and worker liveness to any unauthenticated caller | Low | `GET /ready` | |
-| F-15 | `app.logger.info(f"Text: {body.text}")` writes every caller's full, unbounded submitted text to the process's stdout in plaintext, with no redaction path anywhere in the codebase | Medium | `POST /generate` (logging) | |
-| F-16 | The runtime image's vulnerability surface is unmeasured against a stale, pre-migration baseline | Informational | Runtime image (`Dockerfile`; Trivy scan) | |
-| F-17 | The shipped gunicorn configuration serialises the whole API behind one synthesis, unconditionally on the platform's default configuration | High | gunicorn deployment (`Dockerfile`, `docker-compose.yaml`) | |
-| F-18 | The container runs every process as root; no stage declares a non-root user | Informational | `Dockerfile` (both stages) | |
-| F-19 | `main()`'s console-script entrypoint runs Flask's development server bound to all interfaces | Informational | `src/coqui_ai_api/app.py:1261-1262` | |
+| F-01 | `DESIGN.md`, "Known deviations", cites a stale route count and line number | Informational | `DESIGN.md` (doc accuracy) | Accepted — already recorded |
+| F-02 | `CONTRIBUTING.md`, "API surface", omits 16 of 27 routes | Informational | `CONTRIBUTING.md` (doc accuracy) | Accepted — already recorded |
+| F-03 | `speaker_wav`'s unusable values are silently replaced by the default sample, never rejected | Low | `POST /generate`, `POST /generate/long-form` | Scheduled — EP-05 |
+| F-04 | A symlink already inside `OUTPUT_DIR` is followed by both guards, and published by `GET /voices` | Informational | `speaker_wav` / `voice` / `OUTPUT_DIR` | Scheduled — EP-05 |
+| F-05 | `speaker_wav` and `voice` are two independently written guards over the same resource, and they already disagree | Informational | `speaker_wav` / `voice` handling | Scheduled — EP-05 |
+| F-06 | `DELETE /job/<id>` deletes any file in `OUTPUT_DIR` named `<id>.wav`, including a named voice sample that was never a job | High | `DELETE /job/<job_id>` | Scheduled — EP-05 |
+| F-07 | `job_id` reaches `_get_filename` with no validation at all; today's immunity to traversal is Werkzeug's routing, not this code | Informational | `GET`/`DELETE /job/<job_id>`, `GET /job/<job_id>/progress` | Scheduled — EP-05 |
+| F-08 | Neither native text-input endpoint caps input size; a single request amplifies into an unbounded number of queued jobs | High | `POST /generate`, `POST /generate/long-form` | Scheduled — EP-06 |
+| F-09 | A no-terminator upload becomes one unbounded-length segment, with no bound on how long the sole worker spends synthesising it | High | `POST /generate/long-form` | Scheduled — EP-06 |
+| F-10 | No rate limiting exists on any route, so F-08/F-09's amplification is bounded only by how fast one caller can send requests | High | All routes | Scheduled — EP-07 |
+| F-11 | Disabling job expiration removes the only automatic backstop against F-08/F-09's disk accumulation, with no alternative cleanup an outside caller can trigger | Medium | `JOB_EXPIRATION_SECONDS` / all job routes | Scheduled — EP-06 |
+| F-12 | CORS ships allowing every origin, every method and every header, on every route, under both shipped config files | High | CORS config (`app.py:288`), all routes | Scheduled — EP-04 |
+| F-13 | `GET /voices` and the OpenAPI documentation routes disclose operator-chosen names and the full API schema to any unauthenticated, cross-origin-readable caller | Low | `GET /voices`, `GET /openapi/*` | Scheduled — EP-04 |
+| F-14 | `GET /ready` discloses live queue depth, model-load state and worker liveness to any unauthenticated caller | Low | `GET /ready` | Scheduled — EP-04 |
+| F-15 | `app.logger.info(f"Text: {body.text}")` writes every caller's full, unbounded submitted text to the process's stdout in plaintext, with no redaction path anywhere in the codebase | Medium | `POST /generate` (logging) | Scheduled — EP-09 |
+| F-16 | The runtime image's vulnerability surface is unmeasured against a stale, pre-migration baseline | Informational | Runtime image (`Dockerfile`; Trivy scan) | Accepted — already recorded |
+| F-17 | The shipped gunicorn configuration serialises the whole API behind one synthesis, unconditionally on the platform's default configuration | High | gunicorn deployment (`Dockerfile`, `docker-compose.yaml`) | Scheduled — EP-08 |
+| F-18 | The container runs every process as root; no stage declares a non-root user | Informational | `Dockerfile` (both stages) | Scheduled — EP-08 |
+| F-19 | `main()`'s console-script entrypoint runs Flask's development server bound to all interfaces | Informational | `src/coqui_ai_api/app.py:1261-1262` | Scheduled — EP-08 |
 
 ## What this review could not check offline
 
