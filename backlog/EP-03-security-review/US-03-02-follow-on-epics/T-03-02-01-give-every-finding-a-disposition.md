@@ -5,7 +5,7 @@ schema_version: '2'
 title: Give every finding a disposition and group the scheduled ones
 epic: EP-03
 story: US-03-02
-status: todo
+status: done
 deps:
 - T-03-01-05
 scope:
