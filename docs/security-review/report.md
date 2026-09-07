@@ -136,7 +136,7 @@ against the running service. Per this task's constraints, `DESIGN.md`,
 `CONTRIBUTING.md`, `README.md` and `KNOWN_ISSUES.md` are not edited here —
 `US-03-02` owns that.
 
-### F-01: `DESIGN.md`, "Known deviations", cites a stale route count and line number
+#### F-01: `DESIGN.md`, "Known deviations", cites a stale route count and line number
 
 **Severity:** Informational — a documentation-accuracy problem, not a
 vulnerability in the running service (the underlying claim, "nothing checks a
@@ -161,7 +161,7 @@ $ grep -n "CORS(app" src/coqui_ai_api/app.py
 and the enumeration command in [What was enumerated, and how](#what-was-enumerated-and-how),
 whose output has 27 lines.
 
-### F-02: `CONTRIBUTING.md`, "API surface", omits 16 of 27 routes
+#### F-02: `CONTRIBUTING.md`, "API surface", omits 16 of 27 routes
 
 **Severity:** Informational — a documentation-completeness problem, not a
 vulnerability in the running service.
@@ -187,7 +187,7 @@ enumeration command's output in [What was enumerated, and how](#what-was-enumera
 every `/openapi/...` row past the first, and `/static/<filename>`, has no
 corresponding line in the table.
 
-## Out of scope for this task
+## Out of scope for T-03-01-01
 
 Per `T-03-01-01`'s "Out of scope": input handling on `speaker_wav`, `voice`
 and `job_id`; `/generate/long-form` upload/request limits; CORS and data
@@ -572,7 +572,7 @@ The percent-encoding reproductions above show the `string` converter and
 Werkzeug's merge-slash redirect are what currently stand between a `job_id`
 containing `/` or `..` and `_get_filename`.
 
-## Out of scope for this task
+## Out of scope for T-03-01-02
 
 Per `T-03-01-02`'s "Out of scope": the uploaded file itself on
 `/generate/long-form` (size, decoding, how many jobs it creates — `T-03-01-03`);
@@ -892,7 +892,7 @@ function that removes a finished job's WAV(s) and registry entries,
 `app.py:707-737`) is never invoked automatically, and the only remaining
 trigger is a `DELETE /job/<id>` naming a specific job's own UUID.
 
-## Out of scope for this task
+## Out of scope for T-03-01-03
 
 Per this task's own "Out of scope": the `speaker_wav` form field on
 `/generate/long-form` (`T-03-01-02`, above); the gunicorn deployment's single
@@ -1385,7 +1385,7 @@ application logger (the same one `dictConfig`, `app.py:375-392`, wires to
 this back to me: super secret patient diagnosis details 12345` — the
 submitted text, verbatim, in full.
 
-## Out of scope for this task
+## Out of scope for T-03-01-04
 
 Per this task's own "Out of scope": setting a CORS allowlist, adding an
 origin check, or removing the logging line — the follow-on epic owns the
@@ -1394,6 +1394,52 @@ nothing). The container's network exposure and the gunicorn deployment are
 `T-03-01-05`'s platform section. `DESIGN.md` and `KNOWN_ISSUES.md` are not
 edited here; `US-03-02` owns deciding what to do with F-12 through F-15
 above.
+
+## Authorization
+
+`EP-03`'s first acceptance criterion names authorization as one of the five
+areas this report must cover, alongside authentication, input handling, data
+exposure, and dependency/platform exposure. Unlike those other four,
+authorization has no dedicated section elsewhere in this report — this
+section consolidates what earlier sections already established under that
+label, rather than deriving anything new. No new `F-NN` finding is opened
+here and no existing finding is renumbered or re-verified; every claim below
+cites a section or finding already written.
+
+**There is no ownership, session, or caller-identity concept anywhere in the
+codebase.** [Job ids](#job-ids) already states this plainly: "nothing else is
+checked" beyond a job id, "with no ownership or session concept anywhere in
+the codebase." A bearer token, once one exists, would answer *who is
+calling*; nothing in this codebase today or in `DESIGN.md`'s recorded design
+answers *what that caller is allowed to act on*. The two questions are
+independent, and only the first has a recorded answer.
+
+**[F-06](#f-06-delete-jobid-deletes-any-file-in-output_dir-named-idwav-including-a-named-voice-sample-that-was-never-a-job)
+is an authorization failure in substance, not an authentication one.**
+`DELETE /job/<job_id>` proceeds on `os.path.isfile(_get_filename(job_id))`
+alone — no check of who created the job, or whether the caller was ever told
+its id. Adding a bearer token closes *authentication*'s gap (an anonymous
+caller can no longer reach the route at all) but does nothing about this
+gap: an authenticated caller who simply knows or guesses a `job_id` still
+deletes it, including a named voice sample that was never a job, exactly as
+F-06 describes today. `docs/security-review/dispositions.md` (F-06's row)
+and the EP-05 brief in `docs/security-review/epic-briefs.md` both make this
+same argument already: F-06 "stays exploitable by an authenticated caller
+until EP-05 lands, since it is a logic gap, not an authentication [one]",
+and needs "a logic fix — require the id to be one this project minted, or to
+belong to the caller — not a credential check."
+
+**`DESIGN.md`, "Security model" decides authentication only, and records no
+authorization model at all.** It specifies bearer tokens, the `/health`
+exemption, and CORS's deny-by-default intent — all authentication or
+transport-level decisions. It says nothing about what an authenticated
+caller may act on: no ownership field, no per-caller scoping, no notion of
+"this job belongs to this caller" anywhere in the document. That silence
+means there is no target for this section to measure the running code
+against, unlike the other four areas, each of which DESIGN.md speaks to
+directly. This is itself the gap: an epic that adds authentication (EP-04)
+answers *who*, and F-06 already shows that *who* is not the same question as
+*what they may do* — a question this project's design has not yet decided.
 
 ## Dependency exposure
 
@@ -1637,7 +1683,7 @@ beyond what the rest of this report already establishes.
 `pyproject.toml:29-30`'s `coqui-ai-api` script points at; the shipped
 `Dockerfile`'s active `CMD` (`Dockerfile:70`) never calls it.
 
-## Out of scope for this task
+## Out of scope for T-03-01-05
 
 Per this task's own "Out of scope": building, scanning, or running the
 container image (Docker is not available to this session, per
@@ -1651,10 +1697,8 @@ above, and every finding before them.
 
 Every `F-NN: ...` finding heading in this file, in the order it was
 written, with an empty disposition column for `US-03-02` to fill.
-Generated from this file's own headings (`F-01` and `F-02` are `###`,
-`F-03` onward are `####` — a pre-existing inconsistency from `T-03-01-01`,
-not corrected here since this task's scope is content, not earlier tasks'
-formatting); the count below (19) matches the count of `F-NN:` finding
+Generated from this file's own headings (all `F-NN` headings are now `####`,
+uniformly); the count below (19) matches the count of `F-NN:` finding
 headings in this file.
 
 Severity was reviewed across the whole list for this task (`T-03-01-05`'s
@@ -1743,6 +1787,6 @@ re-derive it.
 | The CORS configuration is assessed as it ships, including the omitted-key default | `US-03-01` AC4 | Yes | [CORS as it ships](#cors-as-it-ships) |
 | Data exposure through job ids, `/voices` and the workspace directory is assessed | `US-03-01` AC5 | Yes | [Data exposure](#data-exposure) |
 | The report is written where `US-03-02` can read it, and its location is stated in the task result | `US-03-01` AC6 | Yes | `docs/security-review/report.md`; stated in this and every prior task's `.orchestrator/result.json` |
-| A findings report exists covering authentication, authorization, input handling, data exposure, and dependency and platform exposure, measured against `DESIGN.md`'s Security model and against current authoritative guidance for the stack | `EP-03` AC1 | **Partially** | Authentication, input handling, data exposure, and dependency/platform exposure each have a dedicated section measured against `DESIGN.md`. Authorization has no section of its own; it is covered only as cross-cutting commentary — the [Job ids](#job-ids) section states plainly that "there is no ownership or session concept anywhere in the codebase," and F-06 is an authorization gap in substance — so the substance exists without the label. Measurement against **current authoritative guidance** was not performed at all: this review measures against `DESIGN.md`'s recorded decisions and this repository's own code, not against live upstream guidance, per `EP-03`'s own constraint that live research needs network access an autonomous session does not have. See [What this review could not check offline](#what-this-review-could-not-check-offline). |
+| A findings report exists covering authentication, authorization, input handling, data exposure, and dependency and platform exposure, measured against `DESIGN.md`'s Security model and against current authoritative guidance for the stack | `EP-03` AC1 | **Partially** | All five areas now have a dedicated section measured against `DESIGN.md`: authentication ([Route enumeration](#route-enumeration)), authorization ([Authorization](#authorization)), input handling ([Input handling: `speaker_wav`, `voice` and `job_id`](#input-handling-speaker_wav-voice-and-job_id)), data exposure ([Data exposure](#data-exposure)), and dependency/platform exposure ([Dependency exposure](#dependency-exposure), [The shipped runtime](#the-shipped-runtime)). Measurement against **current authoritative guidance** was not performed at all: this review measures against `DESIGN.md`'s recorded decisions and this repository's own code, not against live upstream guidance, per `EP-03`'s own constraint that live research needs network access an autonomous session does not have. See [What this review could not check offline](#what-this-review-could-not-check-offline). That half of the criterion remains unmet and is a maintainer step, not something closeable offline. |
 | Every route is enumerated with its current authentication state, including anything `EP-02` added | `EP-03` AC2 | Yes | [Route enumeration](#route-enumeration) includes `POST /v1/audio/speech`, named as `EP-02`'s addition |
 | The CORS default is assessed as shipped, not as configured in an example | `EP-03` AC3 | Yes | [CORS as it ships](#cors-as-it-ships), [Both shipped config paths, checked](#both-shipped-config-paths-checked) |
