@@ -20,6 +20,11 @@ What the project is meant to be, and what has been deliberately decided about it
 lives in [DESIGN.md](DESIGN.md). Read that before proposing a change to the shape
 of the service.
 
+`README.md`, `CONTRIBUTING.md` and `DESIGN.md` are the specification. `docs/`
+holds long-form documents that are records, not specification — `docs/security-review/`
+is `EP-03`'s findings report, dispositions and epic briefs. Nothing under `docs/`
+overrides these three files.
+
 ## Getting started
 
 ### Prerequisites

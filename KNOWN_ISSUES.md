@@ -18,7 +18,7 @@ security review, with dispositions in `docs/security-review/dispositions.md`.
   leaves `flask-cors` at its permissive default. Do not expose this service to
   a network you do not trust. A security model is decided and recorded in
   DESIGN.md; none of it is implemented yet. This was last confirmed live
-  2026-09-07, in `EP-03`'s security review (`docs/security-review/report.md`,
+  2026-09-06, in `EP-03`'s security review (`docs/security-review/report.md`,
   finding F-01) — the count grew from nine before `EP-01`/`EP-02` added the
   documentation blueprints and the `/v1/audio/speech` endpoint, but the
   underlying gap was never smaller than described here.

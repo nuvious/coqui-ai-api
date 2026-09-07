@@ -701,7 +701,7 @@ carries this project's disposition for each of its findings.
   is `CORS(app, **CONFIG.get("cors", {}))`, which with the shipped config
   allows all origins. The [Security model](#security-model) above describes
   the intent. The code does not implement any of it yet. The route count and
-  the line number were corrected 2026-09-07 against
+  the line number were corrected 2026-09-06 against
   `docs/security-review/report.md`, finding **F-01** (disposition in
   `docs/security-review/dispositions.md`) — the earlier "nine routes" /
   `app.py:142` figures predated `EP-01`'s `flask-openapi3` migration and
@@ -721,7 +721,7 @@ carries this project's disposition for each of its findings.
   not have); see [Future work](#future-work), "Measure and scan the migrated
   image". `docs/security-review/report.md`, finding **F-16**, reconfirmed this
   gap still stands as of the `EP-03` review (disposition in
-  `docs/security-review/dispositions.md`); checked 2026-09-07, no new epic
+  `docs/security-review/dispositions.md`); checked 2026-09-06, no new epic
   needed since this record already schedules the work.
 - **`make smoke`'s fit on a GitHub-hosted runner has not been reconfirmed since
   the engine migration.** The prior figure — the old image at 16.9 GB, at or
