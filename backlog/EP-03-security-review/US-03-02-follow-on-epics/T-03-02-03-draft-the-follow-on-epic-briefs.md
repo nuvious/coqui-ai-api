@@ -5,7 +5,7 @@ schema_version: '2'
 title: Draft the epic briefs the maintainer interview turns into backlog files
 epic: EP-03
 story: US-03-02
-status: todo
+status: done
 deps:
 - T-03-02-02
 scope:
