@@ -690,13 +690,23 @@ rule is in `CONTRIBUTING.md` under [For AI agents].
 ## Known deviations
 
 Places the code and this document disagree today. These are findings, not plans.
-Each needs a decision before anything acts on it.
+Each needs a decision before anything acts on it. `docs/security-review/report.md`
+is the full record of `EP-03`'s security review; `docs/security-review/dispositions.md`
+carries this project's disposition for each of its findings.
 
 - **The service has no authentication at all, and CORS allows every origin.**
-  None of the nine routes checks a credential, and `app.py:142` is
-  `CORS(app, **CONFIG.get("cors", {}))`, which with the shipped config allows all
-  origins. The [Security model](#security-model) above describes the intent. The
-  code does not implement any of it yet.
+  None of the 27 routes this project exposes today (10 defined in `app.py`,
+  plus 17 framework-provided: `flask-openapi3`'s documentation-blueprint tree
+  and Flask's own default static route) checks a credential, and `app.py:288`
+  is `CORS(app, **CONFIG.get("cors", {}))`, which with the shipped config
+  allows all origins. The [Security model](#security-model) above describes
+  the intent. The code does not implement any of it yet. The route count and
+  the line number were corrected 2026-09-07 against
+  `docs/security-review/report.md`, finding **F-01** (disposition in
+  `docs/security-review/dispositions.md`) — the earlier "nine routes" /
+  `app.py:142` figures predated `EP-01`'s `flask-openapi3` migration and
+  `EP-02`'s `/v1/audio/speech` endpoint; the underlying claim itself, that
+  nothing checks a credential, was never wrong.
 - **The runtime image's vulnerability surface has not been remeasured since the
   engine migration.** The existing figure — a Trivy scan of the old
   `TTS==0.22.0`-based image on 2026-07-30, finding **435 HIGH and 24 CRITICAL**
@@ -709,7 +719,10 @@ Each needs a decision before anything acts on it.
   this epic on 2026-08-01 to maintainer-run future work (formerly
   T-01-02-03, which needs Docker and network access an autonomous session does
   not have); see [Future work](#future-work), "Measure and scan the migrated
-  image".
+  image". `docs/security-review/report.md`, finding **F-16**, reconfirmed this
+  gap still stands as of the `EP-03` review (disposition in
+  `docs/security-review/dispositions.md`); checked 2026-09-07, no new epic
+  needed since this record already schedules the work.
 - **`make smoke`'s fit on a GitHub-hosted runner has not been reconfirmed since
   the engine migration.** The prior figure — the old image at 16.9 GB, at or
   over a standard runner's free disk — is why `make smoke` runs locally instead
@@ -791,7 +804,8 @@ dropped. None of these is an epic yet.
   CRITICAL); and check the built size against a standard GitHub-hosted
   runner's free disk to decide whether `make smoke` can return to CI. See
   [Known deviations](#known-deviations): both the vulnerability-surface and the
-  `make smoke`-on-CI deviations stand, unmeasured, until this runs.
+  `make smoke`-on-CI deviations stand, unmeasured, until this runs. Also
+  `docs/security-review/report.md`, finding F-16.
 - **Escape the `transformers` pin instead of waiting for `coqui-tts`.** Recorded
   2026-09-06, when a third advisory (CVE-2026-9856) pushed the pin's removal
   condition from `transformers >= 5.5.0` to `>= 5.10.0`. See

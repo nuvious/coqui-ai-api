@@ -5,7 +5,7 @@ schema_version: '2'
 title: Record the accepted findings the specification already decides
 epic: EP-03
 story: US-03-02
-status: todo
+status: done
 deps:
 - T-03-02-01
 scope:

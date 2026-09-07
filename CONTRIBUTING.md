@@ -636,6 +636,14 @@ never started); `is_worker_alive()` checks it and backs the `/ready` endpoint.
 
 ### API surface
 
+The 10 rows through `/` below are this project's own routes, declared by a
+decorator in `app.py`. The rest of the table — 16 `flask-openapi3` documentation
+routes plus Flask's own default static route, 17 in all — is framework-provided:
+registered because of how the app is constructed, not written here, but part of
+the exposed surface all the same. `docs/security-review/report.md`, "What was
+enumerated, and how", is the enumeration this table is drawn from (27 rows
+total; run its `app.url_map` command to reproduce it).
+
 | Method | Path | Purpose |
 |--------|------|---------|
 | POST | `/generate` | Enqueue a TTS job; returns `201 {"job_id": "<uuid>"}` |
@@ -648,4 +656,20 @@ never started); `is_worker_alive()` checks it and backs the `/ready` endpoint.
 | GET | `/health` | Liveness check; always `200 {"status": "ok"}` |
 | GET | `/ready` | Readiness check; `200` when model loaded and worker alive, else `503` |
 | GET | `/` | Web UI |
-| GET | `/openapi` | OpenAPI / Swagger UI (provided by `flask-openapi3`) |
+| GET | `/openapi/` | OpenAPI / Swagger doc index page (provided by `flask-openapi3`) |
+| GET | `/openapi/openapi.json` | The generated OpenAPI document (every route, every request/response schema) |
+| GET | `/openapi/swagger` | Swagger UI |
+| GET | `/openapi/swagger/<filename>` | Static Swagger UI asset |
+| GET | `/openapi/redoc` | ReDoc UI |
+| GET | `/openapi/redoc/<filename>` | Static ReDoc asset |
+| GET | `/openapi/rapidoc` | RapiDoc UI |
+| GET | `/openapi/rapidoc/<filename>` | Static RapiDoc asset |
+| GET | `/openapi/rapipdf` | RapiPDF UI |
+| GET | `/openapi/rapipdf/<filename>` | Static RapiPDF asset |
+| GET | `/openapi/scalar` | Scalar UI |
+| GET | `/openapi/scalar/<filename>` | Static Scalar asset |
+| GET | `/openapi/elements` | Elements UI |
+| GET | `/openapi/elements/<filename>` | Static Elements asset |
+| GET | `/openapi/oauth2-redirect.html` | Static OAuth2-redirect helper page (unused: this project defines no OAuth2 security scheme) |
+| GET | `/openapi/static/<filename>` | Static asset shared across the doc UIs |
+| GET | `/static/<filename>` | Flask's own default static-file route (no `static/` directory ships in the installed package today, so this currently 404s, but the route is registered) |

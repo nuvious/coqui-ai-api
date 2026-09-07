@@ -7,14 +7,21 @@ disagree, the tracker wins.
 
 Each entry below is stated in full in [DESIGN.md](DESIGN.md) under "Known
 deviations" or "Open questions". This file is the short list.
+`docs/security-review/report.md` carries the full findings of `EP-03`'s
+security review, with dispositions in `docs/security-review/dispositions.md`.
 
 ## Security
 
-- **The service has no authentication, and CORS allows every origin.** No route
-  checks a credential, and the shipped configuration leaves `flask-cors` at its
-  permissive default. Do not expose this service to a network you do not trust.
-  A security model is decided and recorded in DESIGN.md; none of it is
-  implemented yet.
+- **The service has no authentication, and CORS allows every origin.** None of
+  the 27 routes this project exposes today (10 of its own, plus 17
+  framework-provided) checks a credential, and the shipped configuration
+  leaves `flask-cors` at its permissive default. Do not expose this service to
+  a network you do not trust. A security model is decided and recorded in
+  DESIGN.md; none of it is implemented yet. This was last confirmed live
+  2026-09-07, in `EP-03`'s security review (`docs/security-review/report.md`,
+  finding F-01) — the count grew from nine before `EP-01`/`EP-02` added the
+  documentation blueprints and the `/v1/audio/speech` endpoint, but the
+  underlying gap was never smaller than described here.
 
 ## Dependencies and the container image
 
@@ -25,7 +32,8 @@ deviations" or "Open questions". This file is the short list.
   project's own code. The migration to a slim base is expected to shrink this,
   but nothing has re-run the scan against the shipped image yet. Descoped to
   maintainer-run future work; full reasoning in DESIGN.md, "Future work",
-  "Measure and scan the migrated image".
+  "Measure and scan the migrated image". Reconfirmed still open by `EP-03`'s
+  security review, `docs/security-review/report.md`, finding F-16.
 - **The engine pins `transformers==5.0.0`, which carries three accepted CVEs.**
   `coqui-tts` 0.27.5 cannot import on `transformers > 5.0.0` (it uses a symbol
   removed in 5.1.0), and no `transformers` release both imports and audits fully
