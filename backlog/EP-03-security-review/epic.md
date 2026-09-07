@@ -8,7 +8,7 @@ depends_on:
 - EP-01
 - EP-02
 planning: done
-review: pending
+review: changes-requested
 ---
 
 ## Goal

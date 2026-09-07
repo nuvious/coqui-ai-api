@@ -5,7 +5,7 @@ schema_version: '2'
 title: Assess dependency and platform exposure and close the report
 epic: EP-03
 story: US-03-01
-status: done
+status: reopened
 deps:
 - T-03-01-04
 scope:
@@ -92,3 +92,13 @@ list of what could not be checked without a network or a host.
   `pyproject.toml` / `uv.lock`.
 - Assigning dispositions, proposing epics, or editing `DESIGN.md`. That is
   `US-03-02`, and T-03-02-01 starts from the index this task produces.
+
+## Review notes
+
+You closed the report and wrote its coverage table, and that table is honest -- it marks EP-03's first acceptance criterion 'Partially' met. Close the part that is closeable offline.
+
+(a) EP-03 AC1 requires the report to cover 'authentication, authorization, input handling, data exposure, and dependency and platform exposure'. Four of those five have a dedicated section. Authorization does not; your coverage table says so ('Authorization has no section of its own; it is covered only as cross-cutting commentary'). Add a short authorization section that consolidates what the report already establishes rather than deriving anything new: that there is no ownership, session, or caller-identity concept anywhere in the codebase (already stated in the 'Job ids' section); that F-06 is an authorization failure in substance, not an authentication one (DELETE /job/<id> proceeds on `os.path.isfile(_get_filename(job_id))` alone, so it stays exploitable by an authenticated caller even after the bearer-token epic ships -- dispositions.md and the EP-05 brief both already make this argument); and that DESIGN.md, 'Security model', decides authentication only and records no authorization model at all, so there is no target to measure the code against. Cite the existing sections and finding ids; do not introduce new F-NN findings, do not renumber, and do not re-run the probes. Then update the coverage table row for EP-03 AC1 to reflect the new section, leaving its correct statement that measurement against current authoritative guidance was not performed and is a maintainer step under EP-03's network constraint.
+
+(b) Seam cleanup in the same file: report.md now has five sections all titled exactly '## Out of scope for this task' (lines 190, 575, 895, 1388, 1640), one left by each appending task, with 'this task' referring to a different, unnamed task each time. In a single 1748-line document read by the maintainer as one report, that heading is ambiguous five times over. Retitle each to name its task (e.g. '## Out of scope for T-03-01-01') or fold them into the sections they belong to. Also fix the heading-level inconsistency your own index flags: F-01 and F-02 are `###` while F-03 onward are `####`. Make them uniform.
+
+No change to src/, tests/, or the container files; EP-03 implements nothing. `make verify` must pass.

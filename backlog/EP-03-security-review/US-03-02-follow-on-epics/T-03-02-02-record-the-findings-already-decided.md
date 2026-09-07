@@ -5,7 +5,7 @@ schema_version: '2'
 title: Record the accepted findings the specification already decides
 epic: EP-03
 story: US-03-02
-status: done
+status: reopened
 deps:
 - T-03-02-01
 scope:
@@ -88,3 +88,15 @@ contain is the maintainer's, and it stays in the ledger until they take it.
   measured against; changing it would move the goalposts after the measurement.
 - `CHANGELOG.md`. Nothing user-facing shipped in this epic.
 - Any change to `src/`, `tests/`, `Makefile`, `pyproject.toml` or `uv.lock`.
+
+## Review notes
+
+Your DESIGN.md and KNOWN_ISSUES.md edits are correct and I verified them: the route count (nine -> 27) and the line pointer (app.py:142 -> app.py:288) both check out against the running app, the deviation is corrected in place rather than deleted or re-scoped, F-16's cross-reference is right, and the CONTRIBUTING.md 'API surface' table now matches `app.url_map` exactly (10 own routes + 17 framework routes = 27 rows, correctly framed by the new prose). One Rule 0 gap remains.
+
+This branch creates `docs/` as a brand-new top-level directory -- it does not exist on dev at all (`git ls-tree -r --name-only dev | grep '^docs/'` returns nothing) -- and adds 2,367 lines under docs/security-review/. Neither CONTRIBUTING.md nor README.md acknowledges that the directory exists or says what belongs there. CLAUDE.md designates CONTRIBUTING.md as the single source of truth for contributor and architecture guidance, and your own acceptance criteria carry Rule 0: review README.md and CONTRIBUTING.md for anything this task makes wrong. A contributor reading CONTRIBUTING.md today has no way to learn that docs/ exists or whether a future document belongs in it; DESIGN.md and KNOWN_ISSUES.md reference individual files inside it, which is not the same as the contributor-facing map acknowledging the tree.
+
+Add a brief entry to CONTRIBUTING.md, in whichever existing section is the natural home, stating that docs/ holds long-form documents that are records rather than specification -- docs/security-review/ being EP-03's report, dispositions, and epic briefs -- and that DESIGN.md, CONTRIBUTING.md and README.md remain the specification. Keep it to a few lines; do not summarise the report's content there. Judge for yourself whether README.md needs anything: it is user-facing, EP-03 changed no user-facing behaviour, and it already links to both DESIGN.md and KNOWN_ISSUES.md, so 'reviewed, no change needed' is an acceptable outcome for README as long as you say so in the result.
+
+While you are in these files, reconcile one date: report.md's header reads 'Date: 2026-09-06', but the records you wrote into DESIGN.md and KNOWN_ISSUES.md cite the check as 2026-09-07. EP-03's fourth acceptance criterion requires a date, so make the two agree.
+
+Do not add or alter any finding disposition (T-03-02-01 owns that), and write no new decision into DESIGN.md that this repository has not taken. `make verify` must pass.

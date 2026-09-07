@@ -5,7 +5,7 @@ schema_version: '2'
 title: Give every finding a disposition and group the scheduled ones
 epic: EP-03
 story: US-03-02
-status: done
+status: reopened
 deps:
 - T-03-01-05
 scope:
@@ -80,3 +80,15 @@ that interview; it does not stand in for it.
   do not silently rewrite the report's analysis.
 - Decomposing any proposed epic into tasks. `orchestrator plan` does that once
   the epics exist (`US-03-02`, "Notes").
+
+## Review notes
+
+Close the loop between docs/security-review/report.md and the disposition ledger you wrote. Two concrete defects, both inside your own scope (docs/security-review/):
+
+(a) report.md's 'Finding index' table (near line 1667) has a Disposition column that is empty for all 19 rows, under a caption that reads 'with an empty disposition column for US-03-02 to fill'. T-03-01-05 built that column specifically for this task to fill. You created docs/security-review/dispositions.md instead and left the column blank, so the column now advertises work that never happened. Fill the Disposition column in report.md's Finding index for all 19 rows with the disposition you already decided in dispositions.md (Scheduled -> EP-0N / Accepted - already recorded), and update the caption so it states the column is filled and names dispositions.md as the authority for the reasoning. Do not copy the reason text into report.md -- one short cell per row plus the pointer.
+
+(b) `grep -n 'dispositions.md\|epic-briefs.md' docs/security-review/report.md` currently returns nothing: report.md never mentions either file, while dispositions.md references report.md 3 times and epic-briefs.md references it 7 times. The cross-referencing is one-directional. This matters now that T-03-02-02 has pointed DESIGN.md, 'Known deviations' and KNOWN_ISSUES.md at report.md as 'the full record of EP-03's security review' -- a reader who follows those pointers lands on 19 findings with no route to their dispositions or to the proposed epics. Add a short forward pointer in report.md (near the top, and again at the Finding index) naming docs/security-review/dispositions.md as where every finding's disposition lives and docs/security-review/epic-briefs.md as where the proposed epics are drafted.
+
+EP-03's fourth acceptance criterion is 'Nothing is left in the report alone.' Both edits exist to make that literally true of the report itself.
+
+Do not change any finding's severity, analysis, or disposition -- they were reviewed and are correct. Do not create anything under backlog/; that remains the maintainer's /orchestrator-feature step. `make verify` must pass.
