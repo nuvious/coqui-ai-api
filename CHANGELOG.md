@@ -16,6 +16,22 @@ The version itself lives in `pyproject.toml` and nowhere else; see
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-01
+
+The first container image of the 0.2 series. `0.2.0` was tagged and released as
+a wheel and sdist, but its image was never published: dependency advisories
+that appeared after it was prepared failed the gate. Use `0.2.1`.
+
+### Security
+
+- Upgraded urllib3 to 2.8.0 (PYSEC-2026-4175, -4176, -4177) and anyio to 4.14.2
+  (PYSEC-2026-4024, -4025).
+- Accepted a fourth `transformers` 5.0.0 advisory, PYSEC-2026-4174
+  (CVE-2026-80047), alongside the three already carried. It needs
+  `generate()` to be called with a remote `custom_generate` repository, which
+  XTTS never does and no API request can set. The reasoning is in
+  `DESIGN.md`.
+
 ## [0.2.0] - 2026-10-01
 
 ### Added
@@ -120,6 +136,7 @@ The version itself lives in `pyproject.toml` and nowhere else; see
 - Packaging as a `src/`-layout Python package built with hatchling.
 - License disclaimer covering Coqui's non-commercial terms.
 
-[Unreleased]: https://github.com/nuvious/coqui-ai-api/compare/0.2.0...HEAD
+[Unreleased]: https://github.com/nuvious/coqui-ai-api/compare/0.2.1...HEAD
+[0.2.1]: https://github.com/nuvious/coqui-ai-api/compare/0.2.0...0.2.1
 [0.2.0]: https://github.com/nuvious/coqui-ai-api/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/nuvious/coqui-ai-api/releases/tag/0.1.0

@@ -391,7 +391,7 @@ The XTTS model weights still carry Coqui's non-commercial licence. The fork
 changes the maintenance story for the code, not the licence on the weights, so
 the disclaimer in `README.md` stands.
 
-### The transformers pin, and three accepted advisories
+### The transformers pin, and four accepted advisories
 
 Decided 2026-08-01, resolving an escalation from T-01-01-02.
 
@@ -436,6 +436,8 @@ single-purpose inference service does not exercise.
     loads XTTS v2. LightGlue (an image-matching model) is never loaded.
   - **CVE-2026-9856** — added 2026-09-06, see
     [The third advisory](#the-third-advisory-cve-2026-9856) below.
+  - **PYSEC-2026-4174** (CVE-2026-80047) — added 2026-10-01, see
+    [The fourth advisory](#the-fourth-advisory-pysec-2026-4174) below.
 
 This is a deliberate, narrow exception, not a new standing policy. It is the
 project's only `pip-audit` ignore, it is tied to this specific upstream
@@ -444,7 +446,7 @@ incompatibility, and **it is to be removed the moment `coqui-tts` allows
 tortoise `isin_mps_friendly` import. That threshold was `>= 5.5.0` until
 2026-09-06; see below for why it moved.
 
-The list is **maintainer-owned**. Adding any *other* ignore — including a fourth
+The list is **maintainer-owned**. Adding any *other* ignore — including a fifth
 one here, should `pip-audit` report a further advisory at 5.0.0 — is a maintainer
 decision reached by escalation, not something a task may do to go green. What a
 task session does in the meantime, so that one dependency advisory does not stop
@@ -493,6 +495,43 @@ all three advisories are fixed. That widens the gap the pin has to hold open —
 `isin_mps_friendly` still disappears at 5.1.0 — and is the reason
 [Future work](#future-work) now carries an item on escaping the pin outright
 rather than waiting on an upstream release.
+
+#### The fourth advisory: PYSEC-2026-4174
+
+Decided 2026-10-01 by the maintainer, after the gate failed on the push that
+released `0.2.0`, and that failure stopped the image from publishing.
+
+`pip-audit` began reporting **PYSEC-2026-4174** (CVE-2026-80047,
+GHSA-x9r9-c232-4q39) against `transformers` 4.49.0 through 5.8.1.
+`GenerativePreTrainedModel.load_custom_generate()` fetches a Hub repository's
+`custom_generate/generate.py` and writes it under
+`~/.cache/huggingface/modules` *before* checking `trust_remote_code`. So the
+file stays on disk even when trust is refused, although it is not executed.
+
+**It is not reachable from this project.** In `transformers` 5.0.0, only one
+route reaches the write before the trust check: calling `generate()` with
+`custom_generate` set to a repository id string. The other two routes check
+trust first. Construction through `from_pretrained` loads only when
+`trust_remote_code=True` is passed. Deprecated generation modes, which map to
+fixed `transformers-community/*` repositories, raise an error before loading
+anything unless `trust_remote_code` is set. Checked against the `coqui-tts` 0.27.5 and
+`transformers` 5.0.0 wheels on 2026-10-01:
+
+- **XTTS never passes `custom_generate`.** `Xtts.inference` calls
+  `GPT.generate` with a fixed set of sampling arguments, and from there
+  `gpt_inference.generate()`. Its `stream_generator.py` accepts the parameter,
+  but its default is `None`. The engine's only `from_pretrained` call is in that
+  file's `__main__` demo, which never runs.
+- **Request input cannot reach it.** The worker calls `tts_to_file` with `text`,
+  `file_path`, `speaker_wav`, and `config.yaml`'s `tts_to_file_params`, which
+  are passed through to `generate()`. A `custom_generate` key there would reach
+  the vulnerable route. But that file is written by the operator, who is already
+  trusted to run code on the host. No request field is merged into those
+  arguments.
+
+If a future change lets callers supply generation arguments, this ignore must
+be argued again, not carried forward. The affected range ends at 5.8.1, below
+the existing `>= 5.10.0` removal condition, so that condition does not change.
 
 ### The runtime image base, and which PyTorch it ships
 
@@ -795,7 +834,7 @@ dropped. None of these is an epic yet.
 - **Escape the `transformers` pin instead of waiting for `coqui-tts`.** Recorded
   2026-09-06, when a third advisory (CVE-2026-9856) pushed the pin's removal
   condition from `transformers >= 5.5.0` to `>= 5.10.0`. See
-  [The transformers pin, and three accepted advisories](#the-transformers-pin-and-three-accepted-advisories).
+  [The transformers pin, and four accepted advisories](#the-transformers-pin-and-four-accepted-advisories).
   The pin exists for one symbol: `coqui-tts` 0.27.5's tortoise layer imports
   `transformers.pytorch_utils.isin_mps_friendly`, removed in 5.1.0. Inspected on
   2026-09-06, that function is about ten lines — `torch.isin`, plus a tiling

@@ -62,9 +62,15 @@ test:
 #   in the tortoise layer XTTS never runs) and a transformers tokenizer or
 #   processor loaded from an untrusted repository (XTTS uses VoiceBpeTokenizer,
 #   which is neither). Added 2026-09-06 by maintainer decision.
-# All three are pinned by transformers==5.0.0, itself required so `from TTS.api
+# --ignore-vuln PYSEC-2026-4174: load_custom_generate() writes a Hub repo's
+#   custom_generate/generate.py to disk before the trust_remote_code check.
+#   Reached only by generate(custom_generate="<repo id>"); XTTS never passes
+#   it, and no request field reaches the generate() kwargs (only the
+#   operator's config.yaml tts_to_file_params does). Added 2026-10-01 by
+#   maintainer decision.
+# All four are pinned by transformers==5.0.0, itself required so `from TTS.api
 # import TTS` can still find transformers.pytorch_utils.isin_mps_friendly. See
-# DESIGN.md, "The transformers pin, and three accepted advisories"; the whole
+# DESIGN.md, "The transformers pin, and four accepted advisories"; the whole
 # list goes away once coqui-tts allows transformers >= 5.10.0. Adding to this
 # list is a maintainer decision reached by escalation, never a task's:
 # CONTRIBUTING.md, "Additional rules for agents".
@@ -72,7 +78,8 @@ audit:
 	$(RUN) pip-audit \
 		--ignore-vuln PYSEC-2026-2289 \
 		--ignore-vuln PYSEC-2026-2290 \
-		--ignore-vuln CVE-2026-9856
+		--ignore-vuln CVE-2026-9856 \
+		--ignore-vuln PYSEC-2026-4174
 
 # The gate. Ordered cheapest-first so a fast failure comes back fast.
 verify: format-check lint typecheck test audit

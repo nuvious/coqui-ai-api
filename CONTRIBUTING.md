@@ -161,14 +161,15 @@ it passes. Add a check by adding it to the Makefile, never to the workflow, so t
 two cannot drift.
 
 > [!NOTE]
-> `pip-audit` runs clean except for exactly three carried advisories,
-> **PYSEC-2026-2289**, **PYSEC-2026-2290** and **CVE-2026-9856**, passed to
+> `pip-audit` runs clean except for exactly four carried advisories,
+> **PYSEC-2026-2289**, **PYSEC-2026-2290**, **CVE-2026-9856** and
+> **PYSEC-2026-4174**, passed to
 > `--ignore-vuln` in the `audit` target with their justification beside them. They
 > are the fallout of the `transformers==5.0.0` pin that `coqui-tts` 0.27.5 forces.
 > This is the project's only `pip-audit` ignore; the full reasoning, the
 > reachability argument for each, and the condition for removing them
 > (`coqui-tts` allowing `transformers >= 5.10.0`) are in [DESIGN.md](DESIGN.md),
-> "The transformers pin, and three accepted advisories".
+> "The transformers pin, and four accepted advisories".
 
 `make verify` never rewrites files. Use `make format` for that.
 
@@ -357,12 +358,13 @@ and specific enough to be followed.
   switch, which is a deployment choice, not something a task should reach for to
   make a test pass.
 - **The `pip-audit` ignore list is closed to you.** The gate's ignores —
-  PYSEC-2026-2289, PYSEC-2026-2290 and CVE-2026-9856 — are enumerated, justified
-  and dated in [DESIGN.md](DESIGN.md), "The transformers pin, and three accepted
+  PYSEC-2026-2289, PYSEC-2026-2290, CVE-2026-9856 and PYSEC-2026-4174 — are
+  enumerated, justified
+  and dated in [DESIGN.md](DESIGN.md), "The transformers pin, and four accepted
   advisories". Do not add one to make a change pass, not even with a written
   justification, and do not edit the `audit` target, `pyproject.toml` or `uv.lock`
   to move an advisory out of the way. Adding an ignore is a maintainer decision
-  reached by escalation. Removing the existing three once `coqui-tts` allows
+  reached by escalation. Removing the existing four once `coqui-tts` allows
   `transformers >= 5.10.0` is expected and encouraged.
 
   **A new advisory does not, by itself, block your task.** If `make verify` fails
