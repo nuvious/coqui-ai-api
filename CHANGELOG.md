@@ -8,12 +8,15 @@ The version itself lives in `pyproject.toml` and nowhere else; see
 [CONTRIBUTING.md](CONTRIBUTING.md) for how a release is cut.
 
 > [!NOTE]
-> Entries before `## [Unreleased]` were reconstructed from git history on
-> 2026-07-30, when this file was first written. `0.1.1` has been the in-development
-> version in the manifest since 2025-08-25 but was never tagged or released, so
-> everything below `Unreleased` is what a `0.1.1` release would contain.
+> Entries for `0.1.0` were reconstructed from git history on 2026-07-30, when
+> this file was first written. `0.1.1` was the in-development version in the
+> manifest from 2025-08-25 and was never tagged; its work shipped as `0.2.0`.
+> An early build of it was pushed to `ghcr.io` as the `:0.1.1` image tag, which
+> does not correspond to any release.
 
 ## [Unreleased]
+
+## [0.2.0] - 2026-10-01
 
 ### Added
 
@@ -41,8 +44,8 @@ The version itself lives in `pyproject.toml` and nowhere else; see
 - Automatic job expiry: completed and errored jobs, and their WAVs, are purged
   after `JOB_EXPIRATION_SECONDS` (default 300; `<= 0` disables it). Orphaned WAVs
   left by a restart are swept at startup.
-- A test suite: 118 tests that mock the TTS engine and need no GPU or model
-  weights.
+- A test suite of over 150 tests that mock the TTS engine and need no GPU or
+  model weights.
 - `make verify`, one command that checks the whole repository: formatting, lint
   with complexity limits, types, tests with a coverage threshold, and a
   dependency vulnerability audit. CI runs exactly this command.
@@ -76,9 +79,10 @@ The version itself lives in `pyproject.toml` and nowhere else; see
   annotations, which 3.9 cannot execute.
 - Endpoints return `Response` objects rather than `(body, status)` tuples, so
   their declared return types are accurate. Behavior is unchanged.
-- The coverage threshold rose from 80% to 95% (actual coverage is 98.45%).
-- SonarQube's quality gate now fails the workflow on push instead of being
-  commented out, and the image is not published unless the gate passes.
+- The coverage threshold rose from 80% to 95%.
+- SonarQube's quality gate now fails its workflow on push instead of being
+  commented out.
+- The container image is not published unless `make verify` passes first.
 - The container image on `ghcr.io` is now the committed primary distribution
   channel rather than something under re-evaluation. Wheel and sdist release
   artifacts remain a secondary channel.
@@ -86,11 +90,10 @@ The version itself lives in `pyproject.toml` and nowhere else; see
   describe the retired `TTS==0.22.0` image's 16.9 GB size and Trivy scan
   findings as current. They now read as a pre-migration baseline, pending
   remeasurement of the slim-base image that replaced it.
-- `DESIGN.md` records a new direction: the service is to speak OpenAI's
-  `/v1/audio/speech` dialect so standard clients and agents can use it unmodified,
-  and to support authentication so it can be exposed beyond a trusted network.
-  Authentication is optional by design, for homelab deployments. None of this is
-  implemented yet; the document records the intent and the code does not match it.
+- `DESIGN.md` records a new direction: the service speaks OpenAI's
+  `/v1/audio/speech` dialect (shipped in this release, above), and is to support
+  optional authentication so it can be exposed beyond a trusted network.
+  Authentication is not implemented yet; see `KNOWN_ISSUES.md`.
 
 ### Removed
 
@@ -117,5 +120,6 @@ The version itself lives in `pyproject.toml` and nowhere else; see
 - Packaging as a `src/`-layout Python package built with hatchling.
 - License disclaimer covering Coqui's non-commercial terms.
 
-[Unreleased]: https://github.com/nuvious/coqui-ai-api/compare/0.1.0...HEAD
+[Unreleased]: https://github.com/nuvious/coqui-ai-api/compare/0.2.0...HEAD
+[0.2.0]: https://github.com/nuvious/coqui-ai-api/compare/0.1.0...0.2.0
 [0.1.0]: https://github.com/nuvious/coqui-ai-api/releases/tag/0.1.0

@@ -289,7 +289,11 @@ attached by hand. To cut a release:
 
 1. Make sure `make verify` passes on the branch to be released.
 2. Bump `version` in `pyproject.toml`. **This is the only place the version
-   lives**; the package, the OpenAPI spec, and the image tag all derive from it.
+   is set**; the package, the OpenAPI spec, and the image tag all derive from it.
+   `uv.lock` records a copy of it, so run `uv lock` after bumping. Bump
+   *before* merging to `main`: every push to `main` republishes the image under
+   the current version, so an unbumped merge silently overwrites that version's
+   existing image tag.
 3. Move the entries under `## [Unreleased]` in `CHANGELOG.md` into a new
    `## [X.Y.Z] - YYYY-MM-DD` section, and update the comparison links at the
    bottom of the file. Entries are human-written summaries, not pasted commit
@@ -299,8 +303,8 @@ attached by hand. To cut a release:
    release.
 
 > [!NOTE]
-> `0.1.1` has been the in-development version in the manifest since 2025-08-25
-> but was never tagged. The last actual release is `0.1.0`.
+> `0.1.1` was never tagged; its work shipped as `0.2.0`. The `:0.1.1` image on
+> `ghcr.io` is an early build pushed by the old workflow, not a release.
 
 A tag-triggered workflow to build and attach those artifacts automatically is
 [future work](DESIGN.md#future-work), not something that exists today.

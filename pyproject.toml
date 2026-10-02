@@ -1,6 +1,6 @@
 [project]
 name = "coqui-ai-api"
-version = "0.1.1"
+version = "0.2.0"
 description = "A REST API wrapper for the Coqui-AI TTS engine with voice cloning support."
 authors = [
     { name = "David Cheeseman", email = "5287736+nuvious@users.noreply.github.com" }
