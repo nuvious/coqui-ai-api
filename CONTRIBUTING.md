@@ -10,15 +10,25 @@ voice cloning behind an async job queue, with a minimal web UI on top.
 > revised on 2026-08-01 following a direction change recorded in
 > [DESIGN.md](DESIGN.md). The dev container section was rewritten on 2026-08-01
 > when that container gained Claude Code, a non-root user, and the credential
-> mounts it needs.
+> mounts it needs. Agent-only guidance moved to [AGENTS.md](AGENTS.md) on
+> 2026-11-03.
 
 This document is the single source of truth for how to develop, test, and ship
-changes. It is written for humans first; an [automated-agent section](#for-ai-agents)
-follows at the end.
+changes, and it applies to human contributors and AI agents alike. Rules that
+bind only autonomous agents (git permissions, the closed `pip-audit` ignore list,
+what to do without network access) live in [AGENTS.md](AGENTS.md).
 
 What the project is meant to be, and what has been deliberately decided about it,
 lives in [DESIGN.md](DESIGN.md). Read that before proposing a change to the shape
 of the service.
+
+## Documentation is part of done
+
+> **Rule 0: documentation is part of "done".** Any change you complete MUST
+> include a check of, and an update (if necessary) to, both the user-facing
+> documentation (`README.md`) and the developer-facing documentation (this
+> `CONTRIBUTING.md`, plus [AGENTS.md](AGENTS.md) when the change touches a rule
+> that binds only agents). A change is not complete until the docs reflect it.
 
 ## Getting started
 
@@ -173,6 +183,10 @@ two cannot drift.
 
 `make verify` never rewrites files. Use `make format` for that.
 
+A change passes the gate by meeting it, not by moving it. Do not lower the
+coverage threshold, add a mypy override for this project's own code, or widen a
+flake8 ignore to make a change pass.
+
 Two things are deliberately outside the gate:
 
 - **SonarQube** runs server-side (`.github/workflows/sonar-build.yml`) so that
@@ -264,13 +278,20 @@ The conventions the tools cannot check, and which matter more:
   compressed `response_format` values are encoded through `soundfile`
   (libsndfile), which reaches the environment as a transitive dependency of
   `coqui-tts` and `librosa` and is present in both the dev container and the
-  shipped image. Adding it to `[project.dependencies]` needs `uv lock` to re-run,
-  and that needs network access this sandbox does not have — `uv lock --offline`
-  cannot resolve this project's graph from cache. It is recorded as maintainer
-  host-only work in [DESIGN.md](DESIGN.md), "Future work". An agent that edits
-  `pyproject.toml` or `uv.lock` to declare it will fail the gate, not fix
-  anything. The test that asserts the `MP3`, `OGG` and `FLAC` encoders are
-  available is what covers the risk in the meantime; do not delete it.
+  shipped image. Adding it to `[project.dependencies]` needs `uv lock` to re-run
+  with network access, because `uv lock --offline` cannot resolve this project's
+  graph from cache, so it is recorded as maintainer host-only work in
+  [DESIGN.md](DESIGN.md), "Future work". The test that asserts the `MP3`, `OGG`
+  and `FLAC` encoders are available is what covers the risk in the meantime; do
+  not delete it.
+- **Never weaken the security posture.** Do not add a route that skips
+  authentication, do not widen the CORS allowlist, and never log or echo a token.
+  The one legitimate way to run without authentication is the documented global
+  switch, which is a deployment choice, not something a change should reach for
+  to make a test pass.
+- **Prefer behavior-preserving refactors.** When code must change to be
+  testable, gate side effects behind flags or functions rather than deleting
+  functionality.
 - **The version lives in `pyproject.toml` and nowhere else.** Read it from
   `coqui_ai_api.__version__`, which comes from installed package metadata.
   `tests/test_version.py` enforces this.
@@ -316,108 +337,11 @@ A tag-triggered workflow to build and attach those artifacts automatically is
 2. Make your change with accompanying tests.
 3. Ensure `make verify` passes.
 4. Add an entry under `## [Unreleased]` in `CHANGELOG.md`.
-5. Update documentation (see the rule below).
+5. Update documentation per
+   [Rule 0](#documentation-is-part-of-done).
 6. Open a pull request describing the change and its rationale.
 
----
-
-## For AI agents
-
-> **Rule 0: documentation is part of "done".** Any task you complete MUST include a
-> check of, and an update (if necessary) to, both the user-facing documentation
-> (`README.md`) and the developer/agent-facing documentation (this `CONTRIBUTING.md`).
-> A change is not complete until the docs reflect it.
-
-### Additional rules for agents
-
-These are inlined verbatim into every autonomous session prompt by
-`.orchestrator.yaml` (`prompts.house_rules`). Keep them short enough to be read
-and specific enough to be followed.
-
-- **Run `make verify` before declaring a task done.** It is the gate. Your claim
-  that the work is correct is a claim, its exit code is the evidence. Do not
-  lower the coverage threshold, add a mypy override for this project's own code,
-  or widen a flake8 ignore to make a change pass.
-- **Git: commit on your own task branch, nothing else.** You may run `git add`
-  and `git commit` on the branch the orchestrator put you on, and you may read
-  history freely (`log`, `diff`, `blame`, `show`, `status`). You may not create
-  or switch branches, merge, push, tag, or rewrite history (`rebase`, `reset
-  --hard`, `push --force`). Merging and pushing belong to the maintainer on the
-  host.
-
-  > [!NOTE]
-  > This is a deliberate override of the backlog-orchestrator default, which
-  > forbids agents from running git at all. The trade is recorded in
-  > [DESIGN.md](DESIGN.md). If you escalate partway through a task, say plainly
-  > in the escalation what you have already committed, because the orchestrator
-  > cannot infer it.
-
-- **Never weaken the security posture.** Do not add a route that skips
-  authentication, do not widen the CORS allowlist, and never log or echo a token.
-  The one legitimate way to run without authentication is the documented global
-  switch, which is a deployment choice, not something a task should reach for to
-  make a test pass.
-- **The `pip-audit` ignore list is closed to you.** The gate's ignores —
-  PYSEC-2026-2289, PYSEC-2026-2290, CVE-2026-9856 and PYSEC-2026-4174 — are
-  enumerated, justified
-  and dated in [DESIGN.md](DESIGN.md), "The transformers pin, and four accepted
-  advisories". Do not add one to make a change pass, not even with a written
-  justification, and do not edit the `audit` target, `pyproject.toml` or `uv.lock`
-  to move an advisory out of the way. Adding an ignore is a maintainer decision
-  reached by escalation. Removing the existing four once `coqui-tts` allows
-  `transformers >= 5.10.0` is expected and encouraged.
-
-  **A new advisory does not, by itself, block your task.** If `make verify` fails
-  *only* at the audit step, on an advisory you did not introduce, it is not your
-  task's failure and halting on it would stop the whole run over something no task
-  can fix. Treat it the way you treat a host-only check. Concretely, all four must
-  hold:
-
-  1. The audit step is the only failing step. Format, lint, types and tests are
-     green, at the normal coverage threshold and with no relaxations.
-  2. Your task's `scope` does not include `pyproject.toml`, `uv.lock` or the
-     `Makefile`, and you changed none of them.
-  3. The failure reproduces on the pre-existing tree. Verify it, do not assume it:
-     stash or otherwise set your changes aside, run `make audit`, and confirm the
-     same advisory appears. If it only appears with your changes applied, you
-     introduced it, and it *is* your task's failure.
-  4. You report it — the advisory id, the affected package and version, the fix
-     version, and the evidence from (3) — in the task result, plainly, as an
-     unresolved gate failure left for the maintainer.
-
-  Then finish the task and report it done. If any of the four does not hold,
-  escalate instead. Do not silence the advisory either way.
-- Follow the response-shape rule in [Code style & conventions](#code-style--conventions).
-  The compatibility fields are frozen. Native shapes may evolve when recorded.
-- Prefer behavior-preserving refactors. When code must change to be testable, gate
-  side effects behind flags/functions rather than deleting functionality.
-- **If the specification does not answer your question, stop and say so.** Read
-  [DESIGN.md](DESIGN.md), including its open questions and known deviations,
-  before assuming something is a bug. Inventing a plausible answer and building on
-  it is worse than halting: the resolution to a genuine gap is an edit to these
-  documents, so a question answered only in chat will be asked again next session.
-- You have no network access. That is how the run loop is meant to work, not a
-  gap in the specification. Follow the standards already recorded here and in
-  DESIGN.md rather than escalating because you cannot check a source. It also
-  means you cannot read the GitHub issue tracker, so `KNOWN_ISSUES.md` in the
-  repository root is the copy you can read.
-- **Host-only checks are the maintainer's, not a bar you must clear.** Some
-  acceptance criteria can only be verified on a host the sandbox does not have:
-  anything that needs Docker (`docker build`, `make smoke`, comparing versions
-  inside a built image) or the network the run loop denies (resolving a CUDA
-  wheel index). The dev container has no Docker socket and no network, by design.
-  For a task like that your bar for "done" is: make the file changes correctly,
-  pass `make verify`, and run whatever offline check the task offers — then state
-  plainly in the task result which criteria are left for a maintainer to verify
-  on the host, and never claim a build, smoke run, or resolution you could not
-  execute. A well-formed task marks those host-only checks as maintainer-verified
-  rather than agent-blocking; reporting an honest "maintainer-verified on host"
-  for them completes the task, it does not fail it. If a task instead lists a
-  host-only check as an ordinary acceptance criterion you are expected to tick,
-  that mismatch is itself a spec gap — escalate it rather than looping on a box
-  you cannot check.
-
-### Architecture
+## Architecture
 
 The package uses a `src/` layout. Build backend is `hatchling`.
 

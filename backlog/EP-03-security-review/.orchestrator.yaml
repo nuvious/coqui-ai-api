@@ -13,7 +13,7 @@ prompts:
   # terse_style: null
   # lean_code: true
   # codebase_map: null
-  house_rules: CONTRIBUTING.md#additional-rules-for-agents
+  house_rules: AGENTS.md#additional-rules-for-agents
   review_checklist: .orchestrator/review-checklist.md
   planning_reference: backlog/EP-01-engine-migration
 git:

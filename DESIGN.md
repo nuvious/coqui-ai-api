@@ -11,8 +11,9 @@ of what the code currently does. Where the two disagree, that disagreement is a
 finding, and the ones already known are recorded under
 [Known deviations](#known-deviations).
 
-`CONTRIBUTING.md` covers how to work on the project. This file covers what the
-project is and what has been deliberately decided about it.
+`CONTRIBUTING.md` covers how to work on the project, and `AGENTS.md` adds the
+rules that bind only autonomous agents. This file covers what the project is and
+what has been deliberately decided about it.
 
 ## Purpose
 
@@ -450,7 +451,7 @@ The list is **maintainer-owned**. Adding any *other* ignore — including a fift
 one here, should `pip-audit` report a further advisory at 5.0.0 — is a maintainer
 decision reached by escalation, not something a task may do to go green. What a
 task session does in the meantime, so that one dependency advisory does not stop
-the whole backlog run, is specified in `CONTRIBUTING.md`, "Additional rules for
+the whole backlog run, is specified in `AGENTS.md`, "Additional rules for
 agents".
 
 #### The third advisory: CVE-2026-9856
@@ -724,7 +725,7 @@ The cost is real and is accepted rather than unnoticed. The orchestrator no
 longer owns the commit history, and a task that escalates partway through can
 leave committed work behind on its branch that a human has to look at. Mutating
 history (`rebase`, `reset --hard`, `push --force`) stays forbidden. The precise
-rule is in `CONTRIBUTING.md` under [For AI agents].
+rule is in `AGENTS.md`, "Additional rules for agents".
 
 ## Known deviations
 

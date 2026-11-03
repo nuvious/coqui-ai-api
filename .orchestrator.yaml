@@ -15,7 +15,9 @@ project:
     - path: DESIGN.md
       covers: design and product decisions
     - path: CONTRIBUTING.md
-      covers: standards, process, and rules for agents (the dev/agent guide)
+      covers: standards and process shared by developers and agents (the dev guide)
+    - path: AGENTS.md
+      covers: rules that bind only autonomous agents (the agent guide)
     - path: README.md
       covers: user-facing behavior (the end-user guide)
 
@@ -55,7 +57,7 @@ models:
 # section is extracted and inlined verbatim into the prompt, so the rules live in one place and the
 # agent still reads them. A rule that is one hop away is a rule that does not exist.
 prompts:
-  house_rules: CONTRIBUTING.md#additional-rules-for-agents
+  house_rules: AGENTS.md#additional-rules-for-agents
   review_checklist: .orchestrator/review-checklist.md
 
   # A directory of hand-written tasks the planner studies for tone, size, and precision. Worth more

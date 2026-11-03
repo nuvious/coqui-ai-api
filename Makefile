@@ -73,7 +73,7 @@ test:
 # DESIGN.md, "The transformers pin, and four accepted advisories"; the whole
 # list goes away once coqui-tts allows transformers >= 5.10.0. Adding to this
 # list is a maintainer decision reached by escalation, never a task's:
-# CONTRIBUTING.md, "Additional rules for agents".
+# AGENTS.md, "Additional rules for agents".
 audit:
 	$(RUN) pip-audit \
 		--ignore-vuln PYSEC-2026-2289 \
