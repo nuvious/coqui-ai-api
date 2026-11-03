@@ -1,7 +1,7 @@
 ---
 id: US-01-03
 type: story
-schema_version: '2'
+schema_version: '3'
 title: Bring the documentation in line with the migration
 epic: EP-01
 ---

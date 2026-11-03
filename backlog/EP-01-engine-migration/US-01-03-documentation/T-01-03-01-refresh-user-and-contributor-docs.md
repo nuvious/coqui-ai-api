@@ -1,7 +1,7 @@
 ---
 id: T-01-03-01
 type: task
-schema_version: '2'
+schema_version: '3'
 title: Refresh the user and contributor docs for the new engine
 epic: EP-01
 story: US-01-03

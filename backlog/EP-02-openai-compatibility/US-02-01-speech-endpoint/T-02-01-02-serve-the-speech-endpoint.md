@@ -1,7 +1,7 @@
 ---
 id: T-02-01-02
 type: task
-schema_version: '2'
+schema_version: '3'
 title: Serve POST /v1/audio/speech over the existing queue
 epic: EP-02
 story: US-02-01

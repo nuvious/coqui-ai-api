@@ -1,7 +1,7 @@
 ---
 id: US-03-01
 type: story
-schema_version: '2'
+schema_version: '3'
 title: Review the surface against the recorded security model
 epic: EP-03
 ---

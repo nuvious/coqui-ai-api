@@ -1,7 +1,7 @@
 ---
 id: US-02-02
 type: story
-schema_version: '2'
+schema_version: '3'
 title: Voice and response format mapping
 epic: EP-02
 ---

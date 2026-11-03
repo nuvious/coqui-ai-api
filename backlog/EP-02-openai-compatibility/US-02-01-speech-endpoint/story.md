@@ -1,7 +1,7 @@
 ---
 id: US-02-01
 type: story
-schema_version: '2'
+schema_version: '3'
 title: The compatibility endpoint, blocking over the job queue
 epic: EP-02
 ---

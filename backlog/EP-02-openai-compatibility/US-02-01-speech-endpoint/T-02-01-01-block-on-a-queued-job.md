@@ -1,7 +1,7 @@
 ---
 id: T-02-01-01
 type: task
-schema_version: '2'
+schema_version: '3'
 title: Block on a queued job until it reaches a terminal state
 epic: EP-02
 story: US-02-01

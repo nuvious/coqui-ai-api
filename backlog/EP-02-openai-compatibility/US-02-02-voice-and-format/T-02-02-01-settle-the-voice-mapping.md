@@ -1,7 +1,7 @@
 ---
 id: T-02-02-01
 type: task
-schema_version: '2'
+schema_version: '3'
 title: Settle and implement how voice maps onto the named WAV samples
 epic: EP-02
 story: US-02-02

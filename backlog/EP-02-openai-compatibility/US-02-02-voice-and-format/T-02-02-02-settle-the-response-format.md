@@ -1,7 +1,7 @@
 ---
 id: T-02-02-02
 type: task
-schema_version: '2'
+schema_version: '3'
 title: Settle and implement what response_format does
 epic: EP-02
 story: US-02-02

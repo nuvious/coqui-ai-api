@@ -1,7 +1,7 @@
 ---
 id: T-01-03-02
 type: task
-schema_version: '2'
+schema_version: '3'
 title: Retire the deviations this epic resolved
 epic: EP-01
 story: US-01-03

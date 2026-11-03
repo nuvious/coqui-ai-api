@@ -1,7 +1,7 @@
 ---
 id: US-01-01
 type: story
-schema_version: '2'
+schema_version: '3'
 title: Swap the engine dependency and lift the Python ceiling
 epic: EP-01
 ---

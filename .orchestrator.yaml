@@ -3,7 +3,7 @@
 
 # Versions this file's own schema. `orchestrator` migrates an older (or absent) value forward on
 # load and writes the result back here, uncommitted, so you review it like any other change.
-schema_version: 3
+schema_version: 13
 
 project:
   name: coqui-ai-api
@@ -63,6 +63,17 @@ prompts:
   planning_reference: backlog/EP-01-engine-migration
 
 git:
+  # The first Ctrl-C during a session begins a graceful close: the session is stopped, its partial
+  # work and a handoff note are committed separately, and the branch is pushed, before exiting.
+  # false restores today's abrupt interrupt instead.
+  graceful_exit: true
+  # Opt-in: lets a task session run `git add`/`git commit` on its own task branch, instead of
+  # leaving every commit host-owned. The cost is trusting the session with git the same way it is
+  # already trusted with the working tree; false (the default) keeps git entirely host-owned.
+  agent_commits: false
+  # Commit whatever a session left in the working tree the moment it exits, so the gate and the
+  # squash always see the same tree. false restores 5.0.0's leave-it-dirty behaviour instead.
+  wip_commits: true
   # Required: no default. Every epic branches from it, every task branches from the epic branch,
   # and a wrong guess would branch and merge against the wrong history.
   # `dev`, not `main`. Repo evidence, checked 2026-08-01: every feature branch in
@@ -115,6 +126,9 @@ update_check:
   enabled: false
 
 limits:
+  # Turn ceiling for the handoff session, which writes one note and runs under models.task rather
+  # than a model of its own.
+  handoff_turns: 15
   # A task that fails its gate is retried once with the failure output as context. A second failure
   # is treated as a specification problem, not a coding problem, and escalates.
   max_retries: 1
@@ -125,3 +139,54 @@ limits:
 
 # Pause after an epic's tasks are generated so you can read them before any code is written.
 approve_plans: true
+
+# Diagnostics: how many run logs .orchestrator/logs/ keeps, how long a phase can stay quiet before
+# a stall notice fires, and whether the claude CLI's own --debug output is captured beside the run
+# log. The log is written for a human to read; nothing in the engine reads it back.
+logging:
+  # How many run logs .orchestrator/logs/ keeps; the oldest are pruned at the start of a run. 0
+  # writes no log at all.
+  keep_runs: 10
+
+  # Seconds of no console output before a phase gets a stall notice, repeating every stall_seconds
+  # while the silence lasts. Picked well under gate.timeout_seconds (1800) so a real stall is
+  # caught with room to spare, and well over a normal quiet stretch in the gate command so the
+  # notice does not become noise. 0 turns it off.
+  stall_seconds: 120
+
+  # Pass the claude CLI's own --debug categories through to a per-session debug file beside the
+  # run log (e.g. "hooks"). Off by default; never interpreted here.
+  # session_debug: hooks
+
+# Harness instruction files rendered as pointers: each entry names a harness and the file it
+# reads, and the rendered file's entire body is a line naming the harness, the instruction never
+# to edit it, and links to AGENTS.md and CONTRIBUTING.md. Shipped here at its default (Claude Code,
+# GitHub Copilot) so a fresh config is already fully-specified; removing this whole section still
+# resolves to that same default, so it is safe to delete rather than comment out. Add a harness by
+# deleting a '#' below.
+harness_pointers:
+  - path: CLAUDE.md
+    name: Claude Code
+  - path: .github/copilot-instructions.md
+    name: GitHub Copilot
+
+  # Other known harness instruction files. Uncomment an entry to add it; delete this whole block
+  # to fall back to the two defaults above.
+
+  # Gemini CLI defaults to GEMINI.md and only reads AGENTS.md when context.fileName lists it.
+  # - path: GEMINI.md
+  #   name: Gemini CLI
+
+  # Cursor documents AGENTS.md as a plain-markdown alternative to .cursor/rules/, and
+  # .cursor/rules/ only loads .mdc files carrying frontmatter, so a pointer written there would
+  # never be read. No entry: Cursor already reads AGENTS.md natively.
+
+# Per-phase command run through the same execution backend the gate runs under, before that
+# phase's session starts (e.g. a code-mapping tool building its map). A non-zero exit or a
+# timeout halts before the session starts; empty (the default) runs nothing and prints nothing.
+# Root-only: a project-wide property, like execution, not a property of one epic's tasks.
+steps:
+  plan: "" # Runs before orchestrator plan's planning session. Default: empty (no-op).
+  task: "" # Runs before every task session, including each retry attempt. Default: empty (no-op).
+  review: "" # Runs before the epic review session. Default: empty (no-op).
+  timeout_seconds: 1800 # Kills a steps command if it hangs.

@@ -1,7 +1,7 @@
 ---
 id: T-02-02-03
 type: task
-schema_version: '2'
+schema_version: '3'
 title: Document the compatibility endpoint and retire the deviation it closes
 epic: EP-02
 story: US-02-02

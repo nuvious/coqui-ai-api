@@ -1,7 +1,7 @@
 ---
 id: US-03-02
 type: story
-schema_version: '2'
+schema_version: '3'
 title: Author the follow-on epics from the findings
 epic: EP-03
 ---

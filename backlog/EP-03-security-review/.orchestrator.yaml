@@ -1,0 +1,36 @@
+gate:
+  # failure_filter: null
+  command: make verify
+  timeout_seconds: 1800
+models:
+  # resolver: null
+  task: sonnet
+  plan: opus
+  review: opus
+  escalate: opus
+prompts:
+  # terse: true
+  # terse_style: null
+  # lean_code: true
+  # codebase_map: null
+  house_rules: CONTRIBUTING.md#additional-rules-for-agents
+  review_checklist: .orchestrator/review-checklist.md
+  planning_reference: backlog/EP-01-engine-migration
+git:
+  # wip_commits: true
+  # agent_commits: false
+  max_commit_files: 400
+limits:
+  # handoff_turns: 15
+  max_retries: 1
+  max_turns: 80
+  session_timeout_seconds: 3600
+dirty_check:
+  paths:
+  - backlog
+schema_version: 13
+
+# logging:
+#   keep_runs: 10
+#   stall_seconds: 120
+#   session_debug: null

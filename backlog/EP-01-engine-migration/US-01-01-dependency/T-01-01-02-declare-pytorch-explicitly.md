@@ -1,7 +1,7 @@
 ---
 id: T-01-01-02
 type: task
-schema_version: '2'
+schema_version: '3'
 title: Declare PyTorch explicitly now the engine no longer bundles it
 epic: EP-01
 story: US-01-01

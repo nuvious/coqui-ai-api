@@ -1,7 +1,7 @@
 ---
 id: US-01-02
 type: story
-schema_version: '2'
+schema_version: '3'
 title: Rebuild the container image on the migrated dependency
 epic: EP-01
 ---

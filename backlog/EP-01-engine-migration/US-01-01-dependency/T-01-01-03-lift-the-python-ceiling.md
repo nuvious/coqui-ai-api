@@ -1,7 +1,7 @@
 ---
 id: T-01-01-03
 type: task
-schema_version: '2'
+schema_version: '3'
 title: Lift the Python ceiling from 3.12 to 3.15
 epic: EP-01
 story: US-01-01

@@ -1,7 +1,7 @@
 ---
 id: EP-03
 type: epic
-schema_version: '2'
+schema_version: '3'
 title: Review the security surface and author the work it implies
 branch: feat/EP-03-security-review
 depends_on:

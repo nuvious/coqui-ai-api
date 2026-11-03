@@ -1,7 +1,7 @@
 ---
 id: EP-01
 type: epic
-schema_version: '2'
+schema_version: '3'
 title: Migrate to the maintained coqui-tts fork
 branch: feat/EP-01-engine-migration
 depends_on: []

@@ -1,7 +1,7 @@
 ---
 id: EP-02
 type: epic
-schema_version: '2'
+schema_version: '3'
 title: Serve the OpenAI-compatible speech endpoint
 branch: feat/EP-02-openai-compatibility
 depends_on:

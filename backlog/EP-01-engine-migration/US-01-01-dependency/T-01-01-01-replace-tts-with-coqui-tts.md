@@ -1,7 +1,7 @@
 ---
 id: T-01-01-01
 type: task
-schema_version: '2'
+schema_version: '3'
 title: Replace the tts dependency with coqui-tts
 epic: EP-01
 story: US-01-01
